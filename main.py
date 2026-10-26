@@ -13,7 +13,7 @@ from reportlab.lib import colors
 
 app = FastAPI(
     title="API de Nutrição Pediátrica & Terapia Sensorial",
-    description="Ferramenta clínica com cálculos avançados, gestão de pacientes e emissão de relatórios em PDF."
+    description="Ferramenta clínica com cálculos de necessidade energética, curvas de crescimento (OMS), gestão de pacientes e relatórios em PDF."
 )
 
 # --- CONFIGURAÇÃO DO BANCO DE DADOS (SQLite) ---
@@ -26,6 +26,7 @@ def inicializar_banco():
             nome TEXT NOT NULL,
             idade_anos INTEGER NOT NULL,
             peso_kg REAL NOT NULL,
+            altura_cm REAL NOT NULL,
             tmb_kcal REAL NOT NULL,
             tdee_kcal REAL NOT NULL,
             agua_ml REAL NOT NULL
@@ -41,12 +42,13 @@ class ItemSensorial(BaseModel):
     alimento: str = Field(..., example="Cenoura crua")
     grupo_alimentar: str = Field(..., example="Vegetais")
     textura: str = Field(..., example="Crocante")
-    nivel_aceitacao: str = Field(..., example="Recusa")  # Aceita, Tolera, Recusa
+    nivel_aceitacao: str = Field(..., example="Recusa")
 
 class PacientePediatrico(BaseModel):
     nome: str = Field(..., example="Joãozinho")
     idade_anos: int = Field(..., ge=1, le=17)
     peso_kg: float = Field(..., gt=0, le=120)
+    altura_cm: float = Field(..., gt=30, le=200, example=110.0)
     nivel_atividade: float = Field(1.3, ge=1.0, le=2.0)
     registro_sensorial: Optional[List[ItemSensorial]] = None
 
@@ -68,6 +70,33 @@ def calcular_macronutrientes(tdee: float):
         "proteinas_g": round(ptn_kcal / 4, 1),
         "lipidios_g": round(lip_kcal / 9, 1),
         "carboidratos_g": round(cho_kcal / 4, 1)
+    }
+
+def avaliar_curva_crescimento_oms(peso_kg: float, altura_cm: float, idade_anos: int):
+    altura_m = altura_cm / 100
+    imc = peso_kg / (altura_m ** 2)
+    
+    # Classificação simplificada baseada no IMC para faixas etárias pediátricas
+    if imc < 14.0:
+        classificacao = "Magreza Acentuada"
+        risco = "Alto risco de desnutrição. Requer intervenção nutricional urgente."
+    elif 14.0 <= imc < 15.5:
+        classificacao = "Magreza"
+        risco = "Risco moderado. Acompanhar ganho ponderal."
+    elif 15.5 <= imc < 18.0:
+        classificacao = "Eutrofia (Adequado)"
+        risco = "Estado nutricional adequado para a faixa etária."
+    elif 18.0 <= imc < 20.0:
+        classificacao = "Sobrepeso"
+        risco = "Alerta para hábitos alimentares e estilo de vida."
+    else:
+        classificacao = "Obesidade"
+        risco = "Recomenda-se readequação do plano alimentar e acompanhamento contínuo."
+
+    return {
+        "imc": round(imc, 2),
+        "classificacao_oms": classificacao,
+        "orientacao_clinica": risco
     }
 
 def analisar_perfil_sensorial(itens: Optional[List[ItemSensorial]]):
@@ -95,7 +124,7 @@ def analisar_perfil_sensorial(itens: Optional[List[ItemSensorial]]):
 # --- ROTAS DA API ---
 @app.get("/")
 def home():
-    return {"mensagem": "API de Nutrição Pediátrica com Gerador de PDF online!"}
+    return {"mensagem": "API de Nutrição Pediátrica com Curvas de Crescimento da OMS online!"}
 
 # 1. CREATE: Cadastrar Paciente
 @app.post("/cadastrar-paciente/")
@@ -107,19 +136,21 @@ def cadastrar_paciente(paciente: PacientePediatrico):
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO pacientes (nome, idade_anos, peso_kg, tmb_kcal, tdee_kcal, agua_ml)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (paciente.nome, paciente.idade_anos, paciente.peso_kg, round(tmb, 2), round(tdee, 2), round(agua_ml, 2)))
+        INSERT INTO pacientes (nome, idade_anos, peso_kg, altura_cm, tmb_kcal, tdee_kcal, agua_ml)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (paciente.nome, paciente.idade_anos, paciente.peso_kg, paciente.altura_cm, round(tmb, 2), round(tdee, 2), round(agua_ml, 2)))
     
     paciente_id = cursor.lastrowid
     conn.commit()
     conn.close()
 
+    avaliacao_oms = avaliar_curva_crescimento_oms(paciente.peso_kg, paciente.altura_cm, paciente.idade_anos)
     analise_sensorial = analisar_perfil_sensorial(paciente.registro_sensorial)
 
     return {
         "id_cadastrado": paciente_id,
-        "mensagem": f"Paciente {paciente.nome} guardado com sucesso!",
+        "mensagem": f"Paciente {paciente.nome} cadastrado com sucesso!",
+        "avaliacao_antropometrica": avaliacao_oms,
         "triagem_sensorial": analise_sensorial
     }
 
@@ -128,7 +159,7 @@ def cadastrar_paciente(paciente: PacientePediatrico):
 def listar_pacientes():
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT id, nome, idade_anos, peso_kg, tmb_kcal, tdee_kcal, agua_ml FROM pacientes")
+    cursor.execute("SELECT id, nome, idade_anos, peso_kg, altura_cm, tmb_kcal, tdee_kcal, agua_ml FROM pacientes")
     registros = cursor.fetchall()
     conn.close()
 
@@ -139,9 +170,10 @@ def listar_pacientes():
             "nome": reg[1],
             "idade_anos": reg[2],
             "peso_kg": reg[3],
-            "tmb_kcal": reg[4],
-            "gasto_energetico_total_kcal": reg[5],
-            "necessidade_hidrica_ml": reg[6]
+            "altura_cm": reg[4],
+            "tmb_kcal": reg[5],
+            "gasto_energetico_total_kcal": reg[6],
+            "necessidade_hidrica_ml": reg[7]
         })
 
     return {"total_pacientes": len(resultado), "pacientes": resultado}
@@ -151,24 +183,27 @@ def listar_pacientes():
 def buscar_paciente(paciente_id: int):
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT id, nome, idade_anos, peso_kg, tmb_kcal, tdee_kcal, agua_ml FROM pacientes WHERE id = ?", (paciente_id,))
+    cursor.execute("SELECT id, nome, idade_anos, peso_kg, altura_cm, tmb_kcal, tdee_kcal, agua_ml FROM pacientes WHERE id = ?", (paciente_id,))
     reg = cursor.fetchone()
     conn.close()
 
     if not reg:
         raise HTTPException(status_code=404, detail="Paciente não encontrado no banco de dados.")
 
-    macros = calcular_macronutrientes(reg[5])
+    macros = calcular_macronutrientes(reg[6])
+    avaliacao_oms = avaliar_curva_crescimento_oms(reg[3], reg[4], reg[2])
 
     return {
         "id": reg[0],
         "nome": reg[1],
         "idade_anos": reg[2],
         "peso_kg": reg[3],
-        "tmb_kcal": reg[4],
-        "gasto_energetico_total_kcal": reg[5],
-        "necessidade_hidrica_ml": reg[6],
-        "distribuicao_macronutrientes": macros
+        "altura_cm": reg[4],
+        "tmb_kcal": reg[5],
+        "gasto_energetico_total_kcal": reg[6],
+        "necessidade_hidrica_ml": reg[7],
+        "distribuicao_macronutrientes": macros,
+        "avaliacao_antropometrica_oms": avaliacao_oms
     }
 
 # 4. UPDATE: Atualizar Dados do Paciente
@@ -188,9 +223,9 @@ def atualizar_paciente(paciente_id: int, paciente: PacientePediatrico):
 
     cursor.execute("""
         UPDATE pacientes
-        SET nome = ?, idade_anos = ?, peso_kg = ?, tmb_kcal = ?, tdee_kcal = ?, agua_ml = ?
+        SET nome = ?, idade_anos = ?, peso_kg = ?, altura_cm = ?, tmb_kcal = ?, tdee_kcal = ?, agua_ml = ?
         WHERE id = ?
-    """, (paciente.nome, paciente.idade_anos, paciente.peso_kg, round(tmb, 2), round(tdee, 2), round(agua_ml, 2), paciente_id))
+    """, (paciente.nome, paciente.idade_anos, paciente.peso_kg, paciente.altura_cm, round(tmb, 2), round(tdee, 2), round(agua_ml, 2), paciente_id))
     
     conn.commit()
     conn.close()
@@ -215,42 +250,40 @@ def deletar_paciente(paciente_id: int):
 
     return {"mensagem": f"Paciente '{reg[1]}' (ID: {paciente_id}) foi removido com sucesso."}
 
-# 6. GERAR RELATÓRIO EM PDF REAL
+# 6. GERAR RELATÓRIO EM PDF COM AVALIAÇÃO OMS
 @app.get("/pacientes/{paciente_id}/relatorio-pdf")
 def gerar_relatorio_pdf(paciente_id: int):
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT id, nome, idade_anos, peso_kg, tmb_kcal, tdee_kcal, agua_ml FROM pacientes WHERE id = ?", (paciente_id,))
+    cursor.execute("SELECT id, nome, idade_anos, peso_kg, altura_cm, tmb_kcal, tdee_kcal, agua_ml FROM pacientes WHERE id = ?", (paciente_id,))
     reg = cursor.fetchone()
     conn.close()
 
     if not reg:
         raise HTTPException(status_code=404, detail="Paciente não encontrado para geração de PDF.")
 
-    nome, idade, peso, tmb, tdee, agua = reg[1], reg[2], reg[3], reg[4], reg[5], reg[6]
+    nome, idade, peso, altura, tmb, tdee, agua = reg[1], reg[2], reg[3], reg[4], reg[5], reg[6], reg[7]
     copos_agua = round(agua / 200, 1)
     macros = calcular_macronutrientes(tdee)
+    avaliacao_oms = avaliar_curva_crescimento_oms(peso, altura, idade)
 
-    # Criação do PDF em memória
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
     story = []
 
-    # Estilos
     styles = getSampleStyleSheet()
     titulo_style = ParagraphStyle('Titulo', parent=styles['Heading1'], fontSize=18, textColor=colors.HexColor('#1E3A8A'), spaceAfter=12)
     subtitulo_style = ParagraphStyle('Subtitulo', parent=styles['Heading2'], fontSize=14, textColor=colors.HexColor('#2563EB'), spaceAfter=8)
     texto_style = ParagraphStyle('Texto', parent=styles['Normal'], fontSize=11, spaceAfter=6)
 
-    # Conteúdo do documento
-    story.append(Paragraph("AVALIAÇÃO DE NUTRIÇÃO PEDIÁTRICA", titulo_style))
+    story.append(Paragraph("AVALIAÇÃO DE NUTRIÇÃO PEDIÁTRICA & CRESCIMENTO", titulo_style))
     story.append(Spacer(1, 10))
 
-    # Tabela de Dados Clínicos
     dados = [
         ["Paciente:", nome, "Idade:", f"{idade} anos"],
-        ["Peso:", f"{peso} kg", "Meta Hídrica:", f"{agua} ml/dia ({copos_agua} copos)"],
-        ["TMB (Schofield):", f"{tmb} kcal", "GET (Total):", f"{tdee} kcal/dia"]
+        ["Peso:", f"{peso} kg", "Altura:", f"{altura} cm"],
+        ["IMC:", f"{avaliacao_oms['imc']} kg/m²", "Classificação OMS:", avaliacao_oms['classificacao_oms']],
+        ["Meta Hídrica:", f"{agua} ml/dia ({copos_agua} copos)", "GET (Total):", f"{tdee} kcal/dia"]
     ]
     tabela = Table(dados, colWidths=[110, 150, 110, 150])
     tabela.setStyle(TableStyle([
@@ -264,7 +297,6 @@ def gerar_relatorio_pdf(paciente_id: int):
     story.append(tabela)
     story.append(Spacer(1, 15))
 
-    # Secção Macronutrientes
     story.append(Paragraph("Distribuição de Macronutrientes Recomendada", subtitulo_style))
     macros_dados = [
         ["Macronutriente", "Percentual", "Gramas Diárias"],
@@ -283,17 +315,14 @@ def gerar_relatorio_pdf(paciente_id: int):
     story.append(tabela_macros)
     story.append(Spacer(1, 15))
 
-    # Recomendações
-    story.append(Paragraph("Orientações Clínicas Gerais", subtitulo_style))
-    story.append(Paragraph("• Distribuir a meta de água em copos ao longo do dia para evitar sobrecarga.", texto_style))
-    story.append(Paragraph("• Respeitar o ritmo de aceitação e os limites sensoriais do paciente.", texto_style))
-    story.append(Paragraph("• Fracionar o plano alimentar em 5 a 6 refeições regulares.", texto_style))
+    story.append(Paragraph("Diagnóstico do Estado Nutricional", subtitulo_style))
+    story.append(Paragraph(f"• <b>Avaliação Antropométrica:</b> {avaliacao_oms['orientacao_clinica']}", texto_style))
+    story.append(Paragraph("• <b>Hidratação:</b> Distribuir o consumo de água ao longo do dia.", texto_style))
+    story.append(Paragraph("• <b>Conduta:</b> Respeitar o ritmo de aceitação e os limites sensoriais do paciente.", texto_style))
 
-    # Construção do PDF
     doc.build(story)
     buffer.seek(0)
 
-    # Retorna o arquivo binário para download
     filename = f"Relatorio_Nutricional_{nome.replace(' ', '_')}.pdf"
     return StreamingResponse(
         buffer,
