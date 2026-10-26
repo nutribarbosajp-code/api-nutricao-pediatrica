@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 app = FastAPI(
     title="API de Nutrição Pediátrica & Terapia Sensorial",
-    description="Ferramenta clínica para cálculo nutricional, hídrico e gestão completa (CRUD) de pacientes."
+    description="Ferramenta clínica para cálculo nutricional, hídrico, gestão (CRUD) e emissão de relatórios."
 )
 
 # --- CONFIGURAÇÃO DO BANCO DE DADOS (SQLite) ---
@@ -54,7 +54,7 @@ def calcular_necessidade_hidrica(peso: float) -> float:
 # --- ROTAS DA API ---
 @app.get("/")
 def home():
-    return {"mensagem": "API de Nutrição Pediátrica - CRUD Completo online!"}
+    return {"mensagem": "API de Nutrição Pediátrica com Relatório Clínico online!"}
 
 # 1. CREATE: Cadastrar Paciente
 @app.post("/cadastrar-paciente/")
@@ -130,13 +130,11 @@ def atualizar_paciente(paciente_id: int, paciente: PacientePediatrico):
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
     
-    # Verifica se existe
     cursor.execute("SELECT id FROM pacientes WHERE id = ?", (paciente_id,))
     if not cursor.fetchone():
         conn.close()
         raise HTTPException(status_code=404, detail="Paciente não encontrado para atualização.")
 
-    # Recalcula necessidades nutricionais atualizadas
     tmb = (22.7 * paciente.peso_kg) + 495
     tdee = tmb * paciente.nivel_atividade
     agua_ml = calcular_necessidade_hidrica(paciente.peso_kg)
@@ -150,7 +148,7 @@ def atualizar_paciente(paciente_id: int, paciente: PacientePediatrico):
     conn.commit()
     conn.close()
 
-    return {"mensagem": f"Dados do paciente ID {paciente_id} atualizados e recalculados com sucesso!"}
+    return {"mensagem": f"Dados do paciente ID {paciente_id} atualizados com sucesso!"}
 
 # 5. DELETE: Remover Paciente
 @app.delete("/pacientes/{paciente_id}")
@@ -169,3 +167,46 @@ def deletar_paciente(paciente_id: int):
     conn.close()
 
     return {"mensagem": f"Paciente '{reg[1]}' (ID: {paciente_id}) foi removido com sucesso."}
+
+# 6. RELATÓRIO CLÍNICO FORMATADO
+@app.get("/pacientes/{paciente_id}/relatorio")
+def gerar_relatorio_paciente(paciente_id: int):
+    conn = sqlite3.connect("pacientes.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, nome, idade_anos, peso_kg, tmb_kcal, tdee_kcal, agua_ml FROM pacientes WHERE id = ?", (paciente_id,))
+    reg = cursor.fetchone()
+    conn.close()
+
+    if not reg:
+        raise HTTPException(status_code=404, detail="Paciente não encontrado para geração de relatório.")
+
+    nome, idade, peso, tmb, tdee, agua = reg[1], reg[2], reg[3], reg[4], reg[5], reg[6]
+    copos_agua = round(agua / 200, 1)  # Considera copos padrão de 200ml
+
+    relatorio_texto = f"""
+    ====================================================
+               RELATÓRIO DE AVALIAÇÃO NUTRICIONAL
+    ====================================================
+    PACIENTE: {nome.upper()}
+    Idade: {idade} anos | Peso: {peso} kg
+    ----------------------------------------------------
+    1. DIAGNÓSTICO ENERGÉTICO DIÁRIO
+       - Taxa Metabólica Basal (Schofield): {tmb} kcal
+       - Necessidade Calórica Total (GET): {tdee} kcal/dia
+
+    2. META DE HIDRATAÇÃO DIÁRIA (Holliday-Segar)
+       - Volume Recomendado: {agua} ml ({agua / 1000:.2f} Litros)
+       - Equivalência Prática: ~{copos_agua} copos de 200ml ao longo do dia
+
+    3. RECOMENDAÇÕES CLÍNICAS GERAIS
+       - Fracionar a ingestão de água entre os períodos da manhã, tarde e noite.
+       - Manter rotina predizível nos horários das refeições.
+       - Respeitar a tolerância sensorial do paciente durante a apresentação de novos alimentos.
+    ====================================================
+    """.strip()
+
+    return {
+        "paciente_id": paciente_id,
+        "paciente_nome": nome,
+        "relatorio_formatado": relatorio_texto
+    }
