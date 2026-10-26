@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 app = FastAPI(
     title="API de Nutrição Pediátrica & Terapia Sensorial",
-    description="Ferramenta clínica para cálculo nutricional, hídrico, gestão (CRUD) e emissão de relatórios."
+    description="Ferramenta clínica com validações avançadas, cálculo de macronutrientes, triagem sensorial e gestão de pacientes."
 )
 
 # --- CONFIGURAÇÃO DO BANCO DE DADOS (SQLite) ---
@@ -33,7 +33,7 @@ class ItemSensorial(BaseModel):
     alimento: str = Field(..., example="Cenoura crua")
     grupo_alimentar: str = Field(..., example="Vegetais")
     textura: str = Field(..., example="Crocante")
-    nivel_aceitacao: str = Field(..., example="Recusa")
+    nivel_aceitacao: str = Field(..., example="Recusa")  # Aceita, Tolera, Recusa
 
 class PacientePediatrico(BaseModel):
     nome: str = Field(..., example="Joãozinho")
@@ -42,7 +42,7 @@ class PacientePediatrico(BaseModel):
     nivel_atividade: float = Field(1.3, ge=1.0, le=2.0)
     registro_sensorial: Optional[List[ItemSensorial]] = None
 
-# --- FUNÇÕES AUXILIARES ---
+# --- FUNÇÕES AUXILIARES E LÓGICA CLÍNICA ---
 def calcular_necessidade_hidrica(peso: float) -> float:
     if peso <= 10:
         return peso * 100
@@ -51,10 +51,44 @@ def calcular_necessidade_hidrica(peso: float) -> float:
     else:
         return 1500 + ((peso - 20) * 20)
 
+def calcular_macronutrientes(tdee: float):
+    # Distribuição pediátrica padrão: PTN 15%, LIP 30%, CHO 55%
+    ptn_kcal = tdee * 0.15
+    lip_kcal = tdee * 0.30
+    cho_kcal = tdee * 0.55
+    
+    return {
+        "proteinas_g": round(ptn_kcal / 4, 1),
+        "lipidios_g": round(lip_kcal / 9, 1),
+        "carboidratos_g": round(cho_kcal / 4, 1)
+    }
+
+def analisar_perfil_sensorial(itens: Optional[List[ItemSensorial]]):
+    if not itens:
+        return {"diagnostico": "Sem registro sensorial cadastrado", "alerta": "Nenhum"}
+    
+    total = len(itens)
+    recusas = sum(1 for item in itens if item.nivel_aceitacao.lower() == "recusa")
+    percentual_recusa = (recusas / total) * 100
+
+    if percentual_recusa >= 50:
+        alerta = "Alto risco de seletividade alimentar severa. Recomenda-se protocolo de dessensibilização."
+    elif percentual_recusa > 20:
+        alerta = "Seletividade moderada. Manter exposição gradual sem pressão."
+    else:
+        alerta = "Aceitação alimentar dentro do esperado."
+
+    return {
+        "total_avaliados": total,
+        "total_recusas": recusas,
+        "percentual_recusa": round(percentual_recusa, 1),
+        "alerta_clinico": alerta
+    }
+
 # --- ROTAS DA API ---
 @app.get("/")
 def home():
-    return {"mensagem": "API de Nutrição Pediátrica com Relatório Clínico online!"}
+    return {"mensagem": "API de Nutrição Pediátrica com Regras Clínicas Avançadas online!"}
 
 # 1. CREATE: Cadastrar Paciente
 @app.post("/cadastrar-paciente/")
@@ -74,9 +108,13 @@ def cadastrar_paciente(paciente: PacientePediatrico):
     conn.commit()
     conn.close()
 
+    # Análise sensorial em tempo real (se fornecida na requisição)
+    analise_sensorial = analisar_perfil_sensorial(paciente.registro_sensorial)
+
     return {
         "id_cadastrado": paciente_id,
-        "mensagem": f"Paciente {paciente.nome} guardado com sucesso!"
+        "mensagem": f"Paciente {paciente.nome} guardado com sucesso!",
+        "triagem_sensorial": analise_sensorial
     }
 
 # 2. READ ALL: Listar Todos
@@ -114,6 +152,8 @@ def buscar_paciente(paciente_id: int):
     if not reg:
         raise HTTPException(status_code=404, detail="Paciente não encontrado no banco de dados.")
 
+    macros = calcular_macronutrientes(reg[5])
+
     return {
         "id": reg[0],
         "nome": reg[1],
@@ -121,7 +161,8 @@ def buscar_paciente(paciente_id: int):
         "peso_kg": reg[3],
         "tmb_kcal": reg[4],
         "gasto_energetico_total_kcal": reg[5],
-        "necessidade_hidrica_ml": reg[6]
+        "necessidade_hidrica_ml": reg[6],
+        "distribuicao_macronutrientes": macros
     }
 
 # 4. UPDATE: Atualizar Dados do Paciente
@@ -168,7 +209,7 @@ def deletar_paciente(paciente_id: int):
 
     return {"mensagem": f"Paciente '{reg[1]}' (ID: {paciente_id}) foi removido com sucesso."}
 
-# 6. RELATÓRIO CLÍNICO FORMATADO
+# 6. RELATÓRIO CLÍNICO FORMATADO AVANÇADO
 @app.get("/pacientes/{paciente_id}/relatorio")
 def gerar_relatorio_paciente(paciente_id: int):
     conn = sqlite3.connect("pacientes.db")
@@ -181,7 +222,8 @@ def gerar_relatorio_paciente(paciente_id: int):
         raise HTTPException(status_code=404, detail="Paciente não encontrado para geração de relatório.")
 
     nome, idade, peso, tmb, tdee, agua = reg[1], reg[2], reg[3], reg[4], reg[5], reg[6]
-    copos_agua = round(agua / 200, 1)  # Considera copos padrão de 200ml
+    copos_agua = round(agua / 200, 1)
+    macros = calcular_macronutrientes(tdee)
 
     relatorio_texto = f"""
     ====================================================
@@ -192,16 +234,21 @@ def gerar_relatorio_paciente(paciente_id: int):
     ----------------------------------------------------
     1. DIAGNÓSTICO ENERGÉTICO DIÁRIO
        - Taxa Metabólica Basal (Schofield): {tmb} kcal
-       - Necessidade Calórica Total (GET): {tdee} kcal/dia
+       - Gasto Energético Total (GET): {tdee} kcal/dia
 
-    2. META DE HIDRATAÇÃO DIÁRIA (Holliday-Segar)
+    2. DISTRIBUIÇÃO DIÁRIA DE MACRONUTRIENTES
+       - Proteínas: {macros['proteinas_g']} g/dia (15%)
+       - Lipídios: {macros['lipidios_g']} g/dia (30%)
+       - Carboidratos: {macros['carboidratos_g']} g/dia (55%)
+
+    3. META DE HIDRATAÇÃO DIÁRIA (Holliday-Segar)
        - Volume Recomendado: {agua} ml ({agua / 1000:.2f} Litros)
        - Equivalência Prática: ~{copos_agua} copos de 200ml ao longo do dia
 
-    3. RECOMENDAÇÕES CLÍNICAS GERAIS
-       - Fracionar a ingestão de água entre os períodos da manhã, tarde e noite.
-       - Manter rotina predizível nos horários das refeições.
-       - Respeitar a tolerância sensorial do paciente durante a apresentação de novos alimentos.
+    4. RECOMENDAÇÕES CLÍNICAS GERAIS
+       - Fracionar a ingestão hídrica ao longo do dia.
+       - Distribuir os macronutrientes em 5 a 6 refeições diárias.
+       - Manter ambiente tranquilo nas refeições e respeitar os limites sensoriais.
     ====================================================
     """.strip()
 
