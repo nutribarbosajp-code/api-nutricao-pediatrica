@@ -1,11 +1,19 @@
+import io
 import sqlite3
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+
+# ReportLab para geração de PDF
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 
 app = FastAPI(
     title="API de Nutrição Pediátrica & Terapia Sensorial",
-    description="Ferramenta clínica com validações avançadas, cálculo de macronutrientes, triagem sensorial e gestão de pacientes."
+    description="Ferramenta clínica com cálculos avançados, gestão de pacientes e emissão de relatórios em PDF."
 )
 
 # --- CONFIGURAÇÃO DO BANCO DE DADOS (SQLite) ---
@@ -52,7 +60,6 @@ def calcular_necessidade_hidrica(peso: float) -> float:
         return 1500 + ((peso - 20) * 20)
 
 def calcular_macronutrientes(tdee: float):
-    # Distribuição pediátrica padrão: PTN 15%, LIP 30%, CHO 55%
     ptn_kcal = tdee * 0.15
     lip_kcal = tdee * 0.30
     cho_kcal = tdee * 0.55
@@ -72,9 +79,9 @@ def analisar_perfil_sensorial(itens: Optional[List[ItemSensorial]]):
     percentual_recusa = (recusas / total) * 100
 
     if percentual_recusa >= 50:
-        alerta = "Alto risco de seletividade alimentar severa. Recomenda-se protocolo de dessensibilização."
+        alerta = "Alto risco de seletividade alimentar severa."
     elif percentual_recusa > 20:
-        alerta = "Seletividade moderada. Manter exposição gradual sem pressão."
+        alerta = "Seletividade moderada. Manter exposição gradual."
     else:
         alerta = "Aceitação alimentar dentro do esperado."
 
@@ -88,7 +95,7 @@ def analisar_perfil_sensorial(itens: Optional[List[ItemSensorial]]):
 # --- ROTAS DA API ---
 @app.get("/")
 def home():
-    return {"mensagem": "API de Nutrição Pediátrica com Regras Clínicas Avançadas online!"}
+    return {"mensagem": "API de Nutrição Pediátrica com Gerador de PDF online!"}
 
 # 1. CREATE: Cadastrar Paciente
 @app.post("/cadastrar-paciente/")
@@ -108,7 +115,6 @@ def cadastrar_paciente(paciente: PacientePediatrico):
     conn.commit()
     conn.close()
 
-    # Análise sensorial em tempo real (se fornecida na requisição)
     analise_sensorial = analisar_perfil_sensorial(paciente.registro_sensorial)
 
     return {
@@ -209,9 +215,9 @@ def deletar_paciente(paciente_id: int):
 
     return {"mensagem": f"Paciente '{reg[1]}' (ID: {paciente_id}) foi removido com sucesso."}
 
-# 6. RELATÓRIO CLÍNICO FORMATADO AVANÇADO
-@app.get("/pacientes/{paciente_id}/relatorio")
-def gerar_relatorio_paciente(paciente_id: int):
+# 6. GERAR RELATÓRIO EM PDF REAL
+@app.get("/pacientes/{paciente_id}/relatorio-pdf")
+def gerar_relatorio_pdf(paciente_id: int):
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
     cursor.execute("SELECT id, nome, idade_anos, peso_kg, tmb_kcal, tdee_kcal, agua_ml FROM pacientes WHERE id = ?", (paciente_id,))
@@ -219,41 +225,78 @@ def gerar_relatorio_paciente(paciente_id: int):
     conn.close()
 
     if not reg:
-        raise HTTPException(status_code=404, detail="Paciente não encontrado para geração de relatório.")
+        raise HTTPException(status_code=404, detail="Paciente não encontrado para geração de PDF.")
 
     nome, idade, peso, tmb, tdee, agua = reg[1], reg[2], reg[3], reg[4], reg[5], reg[6]
     copos_agua = round(agua / 200, 1)
     macros = calcular_macronutrientes(tdee)
 
-    relatorio_texto = f"""
-    ====================================================
-               RELATÓRIO DE AVALIAÇÃO NUTRICIONAL
-    ====================================================
-    PACIENTE: {nome.upper()}
-    Idade: {idade} anos | Peso: {peso} kg
-    ----------------------------------------------------
-    1. DIAGNÓSTICO ENERGÉTICO DIÁRIO
-       - Taxa Metabólica Basal (Schofield): {tmb} kcal
-       - Gasto Energético Total (GET): {tdee} kcal/dia
+    # Criação do PDF em memória
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+    story = []
 
-    2. DISTRIBUIÇÃO DIÁRIA DE MACRONUTRIENTES
-       - Proteínas: {macros['proteinas_g']} g/dia (15%)
-       - Lipídios: {macros['lipidios_g']} g/dia (30%)
-       - Carboidratos: {macros['carboidratos_g']} g/dia (55%)
+    # Estilos
+    styles = getSampleStyleSheet()
+    titulo_style = ParagraphStyle('Titulo', parent=styles['Heading1'], fontSize=18, textColor=colors.HexColor('#1E3A8A'), spaceAfter=12)
+    subtitulo_style = ParagraphStyle('Subtitulo', parent=styles['Heading2'], fontSize=14, textColor=colors.HexColor('#2563EB'), spaceAfter=8)
+    texto_style = ParagraphStyle('Texto', parent=styles['Normal'], fontSize=11, spaceAfter=6)
 
-    3. META DE HIDRATAÇÃO DIÁRIA (Holliday-Segar)
-       - Volume Recomendado: {agua} ml ({agua / 1000:.2f} Litros)
-       - Equivalência Prática: ~{copos_agua} copos de 200ml ao longo do dia
+    # Conteúdo do documento
+    story.append(Paragraph("AVALIAÇÃO DE NUTRIÇÃO PEDIÁTRICA", titulo_style))
+    story.append(Spacer(1, 10))
 
-    4. RECOMENDAÇÕES CLÍNICAS GERAIS
-       - Fracionar a ingestão hídrica ao longo do dia.
-       - Distribuir os macronutrientes em 5 a 6 refeições diárias.
-       - Manter ambiente tranquilo nas refeições e respeitar os limites sensoriais.
-    ====================================================
-    """.strip()
+    # Tabela de Dados Clínicos
+    dados = [
+        ["Paciente:", nome, "Idade:", f"{idade} anos"],
+        ["Peso:", f"{peso} kg", "Meta Hídrica:", f"{agua} ml/dia ({copos_agua} copos)"],
+        ["TMB (Schofield):", f"{tmb} kcal", "GET (Total):", f"{tdee} kcal/dia"]
+    ]
+    tabela = Table(dados, colWidths=[110, 150, 110, 150])
+    tabela.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F3F4F6')),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#D1D5DB')),
+        ('FONTNAME', (0,0), (-1,-1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,-1), 10),
+        ('TEXTCOLOR', (0,0), (-1,-1), colors.HexColor('#1F2937')),
+        ('PADDING', (0,0), (-1,-1), 6),
+    ]))
+    story.append(tabela)
+    story.append(Spacer(1, 15))
 
-    return {
-        "paciente_id": paciente_id,
-        "paciente_nome": nome,
-        "relatorio_formatado": relatorio_texto
-    }
+    # Secção Macronutrientes
+    story.append(Paragraph("Distribuição de Macronutrientes Recomendada", subtitulo_style))
+    macros_dados = [
+        ["Macronutriente", "Percentual", "Gramas Diárias"],
+        ["Proteínas", "15%", f"{macros['proteinas_g']} g"],
+        ["Lipídios", "30%", f"{macros['lipidios_g']} g"],
+        ["Carboidratos", "55%", f"{macros['carboidratos_g']} g"]
+    ]
+    tabela_macros = Table(macros_dados, colWidths=[180, 150, 190])
+    tabela_macros.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2563EB')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#93C5FD')),
+        ('ALIGN', (1,0), (-1,-1), 'CENTER'),
+        ('PADDING', (0,0), (-1,-1), 6),
+    ]))
+    story.append(tabela_macros)
+    story.append(Spacer(1, 15))
+
+    # Recomendações
+    story.append(Paragraph("Orientações Clínicas Gerais", subtitulo_style))
+    story.append(Paragraph("• Distribuir a meta de água em copos ao longo do dia para evitar sobrecarga.", texto_style))
+    story.append(Paragraph("• Respeitar o ritmo de aceitação e os limites sensoriais do paciente.", texto_style))
+    story.append(Paragraph("• Fracionar o plano alimentar em 5 a 6 refeições regulares.", texto_style))
+
+    # Construção do PDF
+    doc.build(story)
+    buffer.seek(0)
+
+    # Retorna o arquivo binário para download
+    filename = f"Relatorio_Nutricional_{nome.replace(' ', '_')}.pdf"
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
