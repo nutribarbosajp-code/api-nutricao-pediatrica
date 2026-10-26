@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 app = FastAPI(
     title="API de Nutrição Pediátrica & Terapia Sensorial",
-    description="Ferramenta clínica para cálculo nutricional, hídrico e gestão de pacientes com banco de dados."
+    description="Ferramenta clínica para cálculo nutricional, hídrico e gestão completa (CRUD) de pacientes."
 )
 
 # --- CONFIGURAÇÃO DO BANCO DE DADOS (SQLite) ---
@@ -26,7 +26,6 @@ def inicializar_banco():
     conn.commit()
     conn.close()
 
-# Inicializa a tabela assim que a API liga
 inicializar_banco()
 
 # --- MODELOS DE DADOS (Pydantic) ---
@@ -43,7 +42,7 @@ class PacientePediatrico(BaseModel):
     nivel_atividade: float = Field(1.3, ge=1.0, le=2.0)
     registro_sensorial: Optional[List[ItemSensorial]] = None
 
-# --- FUNÇÕES DE CÁLCULO ---
+# --- FUNÇÕES AUXILIARES ---
 def calcular_necessidade_hidrica(peso: float) -> float:
     if peso <= 10:
         return peso * 100
@@ -55,15 +54,15 @@ def calcular_necessidade_hidrica(peso: float) -> float:
 # --- ROTAS DA API ---
 @app.get("/")
 def home():
-    return {"mensagem": "API de Nutrição Pediátrica & Banco de Dados online!"}
+    return {"mensagem": "API de Nutrição Pediátrica - CRUD Completo online!"}
 
+# 1. CREATE: Cadastrar Paciente
 @app.post("/cadastrar-paciente/")
 def cadastrar_paciente(paciente: PacientePediatrico):
     tmb = (22.7 * paciente.peso_kg) + 495
     tdee = tmb * paciente.nivel_atividade
     agua_ml = calcular_necessidade_hidrica(paciente.peso_kg)
     
-    # Salvar no Banco de Dados SQLite
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
     cursor.execute("""
@@ -77,17 +76,12 @@ def cadastrar_paciente(paciente: PacientePediatrico):
 
     return {
         "id_cadastrado": paciente_id,
-        "mensagem": f"Paciente {paciente.nome} guardado com sucesso no banco de dados!",
-        "plano": {
-            "tmb_kcal": round(tmb, 2),
-            "gasto_energetico_total_kcal": round(tdee, 2),
-            "necessidade_hidrica_ml": round(agua_ml, 2)
-        }
+        "mensagem": f"Paciente {paciente.nome} guardado com sucesso!"
     }
 
+# 2. READ ALL: Listar Todos
 @app.get("/pacientes/")
 def listar_pacientes():
-    # Buscar todos os pacientes salvos no banco
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
     cursor.execute("SELECT id, nome, idade_anos, peso_kg, tmb_kcal, tdee_kcal, agua_ml FROM pacientes")
@@ -107,3 +101,71 @@ def listar_pacientes():
         })
 
     return {"total_pacientes": len(resultado), "pacientes": resultado}
+
+# 3. READ ONE: Buscar Paciente por ID
+@app.get("/pacientes/{paciente_id}")
+def buscar_paciente(paciente_id: int):
+    conn = sqlite3.connect("pacientes.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, nome, idade_anos, peso_kg, tmb_kcal, tdee_kcal, agua_ml FROM pacientes WHERE id = ?", (paciente_id,))
+    reg = cursor.fetchone()
+    conn.close()
+
+    if not reg:
+        raise HTTPException(status_code=404, detail="Paciente não encontrado no banco de dados.")
+
+    return {
+        "id": reg[0],
+        "nome": reg[1],
+        "idade_anos": reg[2],
+        "peso_kg": reg[3],
+        "tmb_kcal": reg[4],
+        "gasto_energetico_total_kcal": reg[5],
+        "necessidade_hidrica_ml": reg[6]
+    }
+
+# 4. UPDATE: Atualizar Dados do Paciente
+@app.put("/pacientes/{paciente_id}")
+def atualizar_paciente(paciente_id: int, paciente: PacientePediatrico):
+    conn = sqlite3.connect("pacientes.db")
+    cursor = conn.cursor()
+    
+    # Verifica se existe
+    cursor.execute("SELECT id FROM pacientes WHERE id = ?", (paciente_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Paciente não encontrado para atualização.")
+
+    # Recalcula necessidades nutricionais atualizadas
+    tmb = (22.7 * paciente.peso_kg) + 495
+    tdee = tmb * paciente.nivel_atividade
+    agua_ml = calcular_necessidade_hidrica(paciente.peso_kg)
+
+    cursor.execute("""
+        UPDATE pacientes
+        SET nome = ?, idade_anos = ?, peso_kg = ?, tmb_kcal = ?, tdee_kcal = ?, agua_ml = ?
+        WHERE id = ?
+    """, (paciente.nome, paciente.idade_anos, paciente.peso_kg, round(tmb, 2), round(tdee, 2), round(agua_ml, 2), paciente_id))
+    
+    conn.commit()
+    conn.close()
+
+    return {"mensagem": f"Dados do paciente ID {paciente_id} atualizados e recalculados com sucesso!"}
+
+# 5. DELETE: Remover Paciente
+@app.delete("/pacientes/{paciente_id}")
+def deletar_paciente(paciente_id: int):
+    conn = sqlite3.connect("pacientes.db")
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT id, nome FROM pacientes WHERE id = ?", (paciente_id,))
+    reg = cursor.fetchone()
+    if not reg:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Paciente não encontrado para remoção.")
+
+    cursor.execute("DELETE FROM pacientes WHERE id = ?", (paciente_id,))
+    conn.commit()
+    conn.close()
+
+    return {"mensagem": f"Paciente '{reg[1]}' (ID: {paciente_id}) foi removido com sucesso."}
