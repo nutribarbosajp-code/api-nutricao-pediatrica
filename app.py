@@ -14,6 +14,7 @@ menu = st.sidebar.radio(
         "Ficha de Anamnese", 
         "Recordatório 24h", 
         "Repertório & Sugestões IA 🤖", 
+        "Insumos da Sessão 🧺",
         "Diário Sensorial & Fotos", 
         "Emitir Laudo PDF"
     ]
@@ -47,10 +48,10 @@ elif menu == "Ficha de Anamnese":
     paciente_id = st.number_input("ID do Paciente", min_value=1, step=1, value=1, key="ana_id")
     
     with st.form("form_anamnese"):
-        historico = st.text_area("Histórico Clínico / Diagnósticos (ex: TEA, TDAH, APLV, Prematuridade):")
+        historico = st.text_area("Histórico Clínico / Diagnósticos (ex: TEA, TDAH, APLV):")
         comportamento = st.text_area("Comportamento na Mesa / Recusas Principais:")
         marcas = st.text_input("Exige Marcas/Embalagens Específicas? Se sim, quais?")
-        ambiente = st.text_input("Ambiente das Refeições (ex: come no sofá, com telas, à mesa com a família):")
+        ambiente = st.text_input("Ambiente das Refeições (ex: come no sofá, com telas):")
         
         if st.form_submit_button("Guardar Anamnese"):
             payload = {
@@ -150,11 +151,81 @@ elif menu == "Repertório & Sugestões IA 🤖":
                                 st.write(f"**Propriedades em comum:** {sug['propriedades']}")
                                 st.info(f"**Justificativa Clínica:** {sug['justificativa_clinica']}")
                     else:
-                        st.warning(dados_ia.get("mensagem", "Nenhuma ponte encontrada para os alimentos cadastrados."))
+                        st.warning(dados_ia.get("mensagem", "Nenhuma ponte encontrada."))
             except Exception as e:
                 st.error(f"Erro de conexão: {e}")
 
-# --- ABA 5: DIÁRIO SENSORIAL & FOTOS ---
+# --- ABA 5: INSUMOS DA SESSÃO 🧺 ---
+elif menu == "Insumos da Sessão 🧺":
+    st.header("🧺 Solicitação de Alimentos para Consulta & Lembretes")
+    
+    # Alertas automáticos para o profissional
+    try:
+        res_alertas = requests.get(f"{API_URL}/insumos/alertas-pendentes/")
+        if res_alertas.status_code == 200:
+            dados_alertas = res_alertas.json()
+            if dados_alertas["total_alertas"] > 0:
+                st.warning("🔔 **Lembrete Clínico:** Pacientes sem alimentos solicitados para a próxima sessão:")
+                for alerte in dados_alertas["alertas"]:
+                    st.caption(f"⚠️ {alerte['mensagem']}")
+    except Exception as e:
+        pass
+
+    st.divider()
+    paciente_id = st.number_input("ID do Paciente", min_value=1, step=1, value=1, key="ins_id")
+    
+    tab_solicitar, tab_pais_insumos = st.tabs(["👨‍⚕️ Solicitar Alimentos (Terapeuta)", "👨‍👩‍👧 Lista da Próxima Sessão (Pais)"])
+    
+    with tab_solicitar:
+        st.subheader("Cadastrar Lista de Insumos para a Próxima Terapia")
+        data_sessao = st.date_input("Data da Próxima Sessão")
+        alimentos_req = st.text_area("Alimentos Necessários:", placeholder="Ex: 1 Maçã Fuji, 1 pacote de Biscoito de Polvilho")
+        instrucoes = st.text_input("Instruções de Higiene / Corte:", placeholder="Ex: Trazer cortado em rodelas num pote fechado")
+        lembrete = st.selectbox("Frequência dos Lembretes Automáticos", ["24h antes da sessão", "48h e 24h antes", "No dia anterior e às 07:00 do dia da sessão"])
+        
+        if st.button("Enviar Solicitação com Lembretes"):
+            payload = {
+                "paciente_id": paciente_id,
+                "data_consulta": str(data_sessao),
+                "alimentos_solicitados": alimentos_req,
+                "orientacoes_preparo": instrucoes,
+                "lembrete_config": lembrete
+            }
+            try:
+                res = requests.post(f"{API_URL}/insumos/solicitar/", json=payload)
+                if res.status_code == 200:
+                    st.success("Solicitação enviada e lembretes programados com sucesso!")
+            except Exception as e:
+                st.error(f"Erro de conexão: {e}")
+
+    with tab_pais_insumos:
+        st.subheader("📌 Alimentos a Levar na Próxima Consulta")
+        try:
+            res = requests.get(f"{API_URL}/insumos/paciente/{paciente_id}")
+            if res.status_code == 200:
+                lista = res.json()
+                if lista:
+                    for item in lista:
+                        st.info(f"📅 **Sessão do Dia:** {item['data_consulta']}")
+                        st.write(f"🍏 **Alimentos:** {item['alimentos']}")
+                        st.write(f"💡 **Como preparar/trazer:** {item['orientacoes']}")
+                        st.caption(f"⏰ Lembrete configurado: {item['lembrete']}")
+                        
+                        if item['status'] == 'confirmado_pais':
+                            st.success("✅ A família já confirmou que separou estes alimentos!")
+                        else:
+                            if st.button(f"Marcar como Separado / Comprado (Item #{item['id']})"):
+                                res_conf = requests.post(f"{API_URL}/insumos/confirmar/{item['id']}")
+                                if res_conf.status_code == 200:
+                                    st.success("Confirmado! O terapeuta já foi notificado.")
+                                    st.rerun()
+                        st.divider()
+                else:
+                    st.write("Nenhuma solicitação de alimento pendente para a próxima sessão.")
+        except Exception as e:
+            st.error(f"Erro de conexão: {e}")
+
+# --- ABA 6: DIÁRIO SENSORIAL & FOTOS ---
 elif menu == "Diário Sensorial & Fotos":
     st.header("📸 Acompanhamento Família <-> Terapeuta")
     paciente_id = st.number_input("ID do Paciente", min_value=1, step=1, value=1, key="com_id")
@@ -197,7 +268,7 @@ elif menu == "Diário Sensorial & Fotos":
                     st.divider()
         except Exception as e: st.error(f"Erro: {e}")
 
-# --- ABA 6: EMITIR LAUDO PDF ---
+# --- ABA 7: EMITIR LAUDO PDF ---
 elif menu == "Emitir Laudo PDF":
     st.header("📄 Emitir Laudo")
     paciente_id_pdf = st.number_input("ID do Paciente", min_value=1, step=1, value=1, key="pdf_id")

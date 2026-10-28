@@ -2,7 +2,7 @@ import io
 import os
 import sqlite3
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -14,10 +14,10 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-# 1. INSTÂNCIA DO FASTAPI (Precisa vir no topo)
+# 1. INSTÂNCIA DO FASTAPI
 app = FastAPI(
     title="API de Nutrição Pediátrica & IA Sensorial",
-    description="Plataforma clínica completa com anamnese, recordatório 24h, gestão de repertório e IA para pontes alimentares."
+    description="Plataforma clínica completa com gestão de insumos, alertas, anamnese, recordatório 24h e IA para pontes alimentares."
 )
 
 UPLOAD_DIR = "uploads_fotos"
@@ -29,6 +29,7 @@ def inicializar_banco():
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
     
+    # Tabela de Pacientes
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS pacientes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,6 +43,7 @@ def inicializar_banco():
         )
     """)
     
+    # Tabela de Comunicação e Diário Sensorial
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS atividades_comunicacao (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,6 +57,7 @@ def inicializar_banco():
         )
     """)
     
+    # Tabela de Anamnese Pediátrica & Sensorial
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS anamnese (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,6 +70,7 @@ def inicializar_banco():
         )
     """)
     
+    # Tabela de Recordatório 24h
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS recordatorio (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,6 +83,7 @@ def inicializar_banco():
         )
     """)
     
+    # Tabela de Repertório Alimentar
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS repertorio_alimentar (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,6 +94,20 @@ def inicializar_banco():
             sabor TEXT NOT NULL,
             cor TEXT NOT NULL,
             temperatura TEXT NOT NULL,
+            FOREIGN KEY (paciente_id) REFERENCES pacientes (id)
+        )
+    """)
+
+    # Tabela de Solicitação de Insumos / Alimentos para Sessão
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS solicitacoes_insumos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            paciente_id INTEGER NOT NULL,
+            data_consulta TEXT NOT NULL,
+            alimentos_solicitados TEXT NOT NULL,
+            orientacoes_preparo TEXT,
+            status TEXT DEFAULT 'pendente',
+            lembrete_config TEXT NOT NULL,
             FOREIGN KEY (paciente_id) REFERENCES pacientes (id)
         )
     """)
@@ -131,6 +150,13 @@ class AlimentoRepertorioSchema(BaseModel):
 class TarefaProfissional(BaseModel):
     paciente_id: int
     orientacao_tarefa: str
+
+class SolicitacaoInsumoSchema(BaseModel):
+    paciente_id: int
+    data_consulta: str
+    alimentos_solicitados: str
+    orientacoes_preparo: str
+    lembrete_config: str
 
 # --- BASE DE CONHECIMENTO DE PONTES ALIMENTARES (IA) ---
 BANCO_ALIMENTOS_IA = [
@@ -187,7 +213,7 @@ def avaliar_curva_crescimento_oms(peso_kg: float, altura_cm: float, idade_anos: 
 # --- ROTAS DA API ---
 @app.get("/")
 def home():
-    return {"mensagem": "API de Nutrição Pediátrica & Módulo de IA Sensorial Ativos!"}
+    return {"mensagem": "API de Nutrição Pediátrica, IA Sensorial & Gestão de Insumos Ativa!"}
 
 @app.post("/cadastrar-paciente/")
 def cadastrar_paciente(paciente: PacientePediatrico):
@@ -326,6 +352,79 @@ def sugerir_pontes_alimentares_ia(paciente_id: int):
 
     return {"paciente_id": paciente_id, "total_sugestoes": len(sugestoes), "sugestoes": sugestoes}
 
+# --- SOLICITAÇÃO DE INSUMOS & ALERTAS ---
+@app.post("/insumos/solicitar/")
+def solicitar_insumo_sessao(dados: SolicitacaoInsumoSchema):
+    conn = sqlite3.connect("pacientes.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO solicitacoes_insumos (paciente_id, data_consulta, alimentos_solicitados, orientacoes_preparo, lembrete_config)
+        VALUES (?, ?, ?, ?, ?)
+    """, (dados.paciente_id, dados.data_consulta, dados.alimentos_solicitados, dados.orientacoes_preparo, dados.lembrete_config))
+    conn.commit()
+    conn.close()
+    return {"mensagem": "Solicitação enviada e lembretes configurados!"}
+
+@app.get("/insumos/paciente/{paciente_id}")
+def obter_insumos_paciente(paciente_id: int):
+    conn = sqlite3.connect("pacientes.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, data_consulta, alimentos_solicitados, orientacoes_preparo, status, lembrete_config
+        FROM solicitacoes_insumos
+        WHERE paciente_id = ?
+        ORDER BY id DESC
+    """, (paciente_id,))
+    registros = cursor.fetchall()
+    conn.close()
+    return [
+        {
+            "id": r[0],
+            "data_consulta": r[1],
+            "alimentos": r[2],
+            "orientacoes": r[3],
+            "status": r[4],
+            "lembrete": r[5]
+        } for r in registros
+    ]
+
+@app.post("/insumos/confirmar/{solicitacao_id}")
+def confirmar_preparo_pais(solicitacao_id: int):
+    conn = sqlite3.connect("pacientes.db")
+    cursor = conn.cursor()
+    cursor.execute("UPDATE solicitacoes_insumos SET status = 'confirmado_pais' WHERE id = ?", (solicitacao_id,))
+    conn.commit()
+    conn.close()
+    return {"mensagem": "Confirmação registrada com sucesso!"}
+
+@app.get("/insumos/alertas-pendentes/")
+def verificar_alertas_profissionais():
+    """Busca pacientes sem solicitação de alimentos cadastrada."""
+    conn = sqlite3.connect("pacientes.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT p.id, p.nome, MAX(s.data_consulta)
+        FROM pacientes p
+        LEFT JOIN solicitacoes_insumos s ON p.id = s.paciente_id
+        GROUP BY p.id
+    """)
+    pacientes = cursor.fetchall()
+    conn.close()
+
+    alertas = []
+    hoje_str = datetime.now().strftime("%Y-%m-%d")
+
+    for p in pacientes:
+        paciente_id, nome, ultima_data = p[0], p[1], p[2]
+        if not ultima_data or ultima_data < hoje_str:
+            alertas.append({
+                "paciente_id": paciente_id,
+                "nome": nome,
+                "mensagem": f"Atenção: O paciente {nome} (ID {paciente_id}) não possui alimentos solicitados para a próxima sessão!"
+            })
+
+    return {"total_alertas": len(alertas), "alertas": alertas}
+
 # --- COMUNICAÇÃO ---
 @app.post("/comunicacao/prescrever-tarefa/")
 def prescrever_tarefa(tarefa: TarefaProfissional):
@@ -366,96 +465,4 @@ async def registrar_oferta_familia(
     conn.close()
     return {"mensagem": "Registro enviado!"}
 
-@app.get("/comunicacao/historico/{paciente_id}")
-def obter_historico_comunicacao(paciente_id: int):
-    conn = sqlite3.connect("pacientes.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, data_registro, remetente, mensagem_tarefa, nivel_reacao, caminho_foto FROM atividades_comunicacao WHERE paciente_id = ? ORDER BY id DESC", (paciente_id,))
-    registros = cursor.fetchall()
-    conn.close()
-    return {"feed": [{"id": r[0], "data": r[1], "enviado_por": r[2], "mensagem": r[3], "nivel_reacao": r[4], "foto_url": r[5]} for r in registros]}
-
-# --- LAUDO EM PDF COMPLETO COM OMS E MACRONUTRIENTES ---
-@app.get("/pacientes/{paciente_id}/relatorio-pdf")
-def gerar_relatorio_pdf(paciente_id: int):
-    conn = sqlite3.connect("pacientes.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT nome, idade_anos, peso_kg, altura_cm, tmb_kcal, tdee_kcal, agua_ml FROM pacientes WHERE id = ?", (paciente_id,))
-    reg = cursor.fetchone()
-    conn.close()
-
-    if not reg:
-        raise HTTPException(status_code=404, detail="Paciente não encontrado.")
-
-    nome, idade, peso, altura, tmb, tdee, agua = reg[0], reg[1], reg[2], reg[3], reg[4], reg[5], reg[6]
-    
-    # Cálculos Clínicos
-    oms = avaliar_curva_crescimento_oms(peso, altura, idade)
-    macros = calcular_macronutrientes(tdee)
-
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=35, bottomMargin=35)
-    story = []
-
-    styles = getSampleStyleSheet()
-    titulo_style = ParagraphStyle('Titulo', parent=styles['Heading1'], fontSize=16, textColor=colors.HexColor('#1E3A8A'), spaceAfter=10)
-    subtitulo_style = ParagraphStyle('Subtitulo', parent=styles['Heading2'], fontSize=12, textColor=colors.HexColor('#2563EB'), spaceBefore=10, spaceAfter=6)
-    texto_style = ParagraphStyle('Texto', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor('#1F2937'), spaceBefore=4)
-
-    # Cabeçalho
-    story.append(Paragraph("RELATÓRIO DE NUTRIÇÃO PEDIÁTRICA & TERAPIA SENSORIAL", titulo_style))
-    story.append(Spacer(1, 8))
-
-    # Tabela 1: Dados do Paciente
-    dados = [
-        ["Paciente:", nome, "Idade:", f"{idade} anos"],
-        ["Peso:", f"{peso} kg", "Altura:", f"{altura} cm"],
-        ["Meta Hídrica:", f"{agua} ml/dia", "GET Total:", f"{tdee} kcal/dia"]
-    ]
-    tabela = Table(dados, colWidths=[100, 160, 100, 160])
-    tabela.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F3F4F6')),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#D1D5DB')),
-        ('PADDING', (0,0), (-1,-1), 5),
-    ]))
-    story.append(tabela)
-    story.append(Spacer(1, 10))
-
-    # Tabela 2: Diagnóstico Antropométrico (OMS)
-    story.append(Paragraph("Avaliação Antropométrica (Curvas da OMS)", subtitulo_style))
-    oms_dados = [
-        ["Indicador OMS", "Resultado Obtido"],
-        ["IMC Calculado", f"{oms['imc']} kg/m²"],
-        ["Escore Z (Z-Score)", oms['z_score']],
-        ["Percentil Estimado", oms['percentil_estimado']],
-        ["Classificação Nutricional", oms['classificacao_oms']]
-    ]
-    tabela_oms = Table(oms_dados, colWidths=[220, 300])
-    tabela_oms.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2563EB')),
-        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#93C5FD')),
-        ('PADDING', (0,0), (-1,-1), 5),
-    ]))
-    story.append(tabela_oms)
-    story.append(Paragraph(f"<b>Parecer Clínico OMS:</b> {oms['orientacao_clinica']}", texto_style))
-    story.append(Spacer(1, 10))
-
-    # Tabela 3: Distribuição de Macronutrientes
-    story.append(Paragraph("Distribuição Estimada de Macronutrientes", subtitulo_style))
-    macro_dados = [
-        ["Proteínas (15%)", "Lipídios / Gorduras (30%)", "Carboidratos (55%)"],
-        [f"{macros['proteinas_g']} g/dia", f"{macros['lipidios_g']} g/dia", f"{macros['carboidratos_g']} g/dia"]
-    ]
-    tabela_macro = Table(macro_dados, colWidths=[170, 180, 170])
-    tabela_macro.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#059669')),
-        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#A7F3D0')),
-        ('PADDING', (0,0), (-1,-1), 5),
-    ]))
-    story.append(tabela_macro)
-
-    doc.build(story)
-    buffer.seek(0)
-    return StreamingResponse(buffer, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=Relatorio_{nome}.pdf"})
+@app.get("/comunicacao/historico/{pac
