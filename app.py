@@ -111,33 +111,52 @@ elif menu == "Repertório & Sugestões IA 🤖":
     tab_cad, tab_ia = st.tabs(["📌 Registar Alimentos no Repertório", "🤖 Motor de IA (Pontes Alimentares)"])
     
     with tab_cad:
-        st.subheader("Mapear Propriedades Sensoriais dos Alimentos")
-        with st.form("form_rep"):
+            st.subheader("Mapear Propriedades Sensoriais dos Alimentos")
+            
             alim_nome = st.text_input("Nome do Alimento", placeholder="Ex: Batata Frita")
+            
+            # --- Lógica Dinâmica da Escada do Comer ---
             status_alim = st.selectbox("Status no Tratamento", ["seguro", "em_trabalho", "recusado"])
+            passo_escada = None
             
+            if status_alim == "em_trabalho":
+                passo_escada = st.selectbox("Etapa na Escada do Comer", 
+                    ["1. Tolerar", "2. Interagir", "3. Cheirar", "4. Tocar", "5. Provar", "6. Comer"]
+                )
+            
+            # --- Atributos Sensoriais ---
             c1, c2, c3, c4 = st.columns(4)
-            with c1: text_opt = st.selectbox("Textura", ["Crocante", "Macio", "Pastoso", "Liquido", "Seco"])
-            with c2: sab_opt = st.selectbox("Sabor", ["Salgado", "Doce", "Azedo", "Neutro"])
-            with c3: cor_opt = st.selectbox("Cor Dominante", ["Amarelo/Bege", "Verde", "Vermelho", "Laranja", "Escuro"])
-            with c4: temp_opt = st.selectbox("Temperatura", ["Quente", "Morno", "Frio", "Gelado"])
+            with c1: 
+                text_opt = st.selectbox("Textura", ["Crocante", "Macio", "Pastoso", "Liquido", "Seco"])
+            with c2: 
+                sab_opt = st.selectbox("Sabor", ["Salgado", "Doce", "Azedo", "Neutro"])
+            with c3: 
+                # Campo livre para o profissional digitar a cor exata
+                cor_opt = st.text_input("Cor Dominante", placeholder="Ex: Vermelho vibrante")
+            with c4: 
+                temp_opt = st.selectbox("Temperatura", ["Quente", "Morno", "Frio", "Gelado"])
             
-            if st.form_submit_button("Adicionar ao Repertório"):
+            if st.button("Adicionar ao Repertório"):
+                # Anexa o passo da escada ao status para o backend receber a informação completa
+                status_final = f"em_trabalho ({passo_escada})" if status_alim == "em_trabalho" else status_alim
+                
                 payload = {
                     "paciente_id": paciente_id,
                     "alimento": alim_nome,
-                    "status": status_alim,
+                    "status": status_final,
                     "textura": text_opt,
                     "sabor": sab_opt,
                     "cor": cor_opt,
                     "temperatura": temp_opt
                 }
+                
                 try:
                     res = requests.post(f"{API_URL}/repertorio/", json=payload)
                     if res.status_code == 200:
                         st.success("Alimento registado no repertório sensorial!")
                 except Exception as e:
                     st.error(f"Erro de conexão: {e}")
+
 
     with tab_ia:
         st.subheader("💡 Algoritmo de Pontes Alimentares (Food Chaining)")
@@ -182,26 +201,37 @@ elif menu == "Insumos da Sessão 🧺":
     tab_solicitar, tab_pais_insumos = st.tabs(["👨‍⚕️ Solicitar Alimentos (Terapeuta)", "👨‍👩‍👧 Lista da Próxima Sessão (Pais)"])
     
     with tab_solicitar:
-        st.subheader("Cadastrar Lista de Insumos para a Próxima Terapia")
-        data_sessao = st.date_input("Data da Próxima Sessão")
-        alimentos_req = st.text_area("Alimentos Necessários:", placeholder="Ex: 1 Maçã Fuji, 1 pacote de Biscoito de Polvilho")
-        instrucoes = st.text_input("Instruções de Higiene / Corte:", placeholder="Ex: Trazer cortado em rodelas num pote fechado")
-        lembrete = st.selectbox("Frequência dos Lembretes Automáticos", ["24h antes da sessão", "48h e 24h antes", "No dia anterior e às 07:00 do dia da sessão"])
-        
-        if st.button("Enviar Solicitação com Lembretes"):
-            payload = {
-                "paciente_id": paciente_id,
-                "data_consulta": str(data_sessao),
-                "alimentos_solicitados": alimentos_req,
-                "orientacoes_preparo": instrucoes,
-                "lembrete_config": lembrete
-            }
-            try:
-                res = requests.post(f"{API_URL}/insumos/solicitar/", json=payload)
-                if res.status_code == 200:
-                    st.success("Solicitação enviada e lembretes programados com sucesso!")
-            except Exception as e:
-                st.error(f"Erro de conexão: {e}")
+            st.subheader("Cadastrar Lista de Insumos para a Próxima Terapia")
+            data_sessao = st.date_input("Data da Próxima Sessão")
+            alimentos_req = st.text_area("Alimentos Necessários:", placeholder="Ex: 1 Maçã Fuji, 1 pacote de Biscoito de Polvilho")
+            instrucoes = st.text_input("Instruções de Higiene / Corte:", placeholder="Ex: Trazer cortado em rodelas num pote fechado")
+            
+            # --- Configuração de Lembrete e Horário Lado a Lado ---
+            col_lembrete, col_hora = st.columns(2)
+            with col_lembrete:
+                lembrete = st.selectbox("Frequência do Lembrete", ["24h antes da sessão", "48h antes da sessão", "Na manhã da sessão"])
+            with col_hora:
+                hora_lembrete = st.time_input("Horário exato da notificação")
+                
+            if st.button("Enviar Solicitação com Lembretes"):
+                # Junta o dia e a hora para formar uma única string de configuração
+                lembrete_final = f"{lembrete} às {hora_lembrete.strftime('%H:%M')}"
+                
+                payload = {
+                    "paciente_id": paciente_id,
+                    "data_consulta": str(data_sessao),
+                    "alimentos_solicitados": alimentos_req,
+                    "orientacoes_preparo": instrucoes,
+                    "lembrete_config": lembrete_final
+                }
+                
+                try:
+                    res = requests.post(f"{API_URL}/insumos/solicitar/", json=payload)
+                    if res.status_code == 200:
+                        st.success("Solicitação enviada e lembretes programados com sucesso!")
+                except Exception as e:
+                    st.error(f"Erro de conexão: {e}")
+
 
     with tab_pais_insumos:
         st.subheader("📌 Alimentos a Levar na Próxima Consulta")
