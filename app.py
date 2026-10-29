@@ -3,7 +3,12 @@ import requests
 
 st.set_page_config(page_title="Plataforma de Nutrição Pediátrica & IA", page_icon="👶", layout="wide")
 
-API_URL = "http://127.0.0.1:8000"
+# Tenta usar a URL do Render configurada no Streamlit. Se não encontrar (testando no PC), usa a local.
+try:
+    API_URL = st.secrets["API_URL"]
+except:
+    API_URL = "http://127.0.0.1:8000"
+
 
 st.title("👶 Sistema de Nutrição Pediátrica, Terapia Sensorial & IA")
 
