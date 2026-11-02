@@ -361,22 +361,12 @@ def sugerir_pontes_alimentares_ia(paciente_id: int):
 
     # 3. Chamar o Google Gemini
     try:
-        # Puxa a chave de segurança que configuramos no Render
         genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-        
-        # Truque infalível: perguntar ao Google quais modelos a sua chave tem permissão para usar
-        modelos_disponiveis = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                modelos_disponiveis.append(m.name)
-        
-        # Usa o primeiro modelo válido da lista (ignora a confusão de nomes do Google)
-        modelo_escolhido = modelos_disponiveis[0]
-        model = genai.GenerativeModel(modelo_escolhido)
+        # Com a biblioteca atualizada, o 1.5-flash vai funcionar perfeitamente!
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
         response = model.generate_content(prompt)
         
-        # Limpar qualquer formatação indesejada que a IA possa adicionar e converter para JSON
         texto_resposta = response.text.replace("```json", "").replace("```", "").strip()
         sugestoes_geradas = json.loads(texto_resposta)
         
