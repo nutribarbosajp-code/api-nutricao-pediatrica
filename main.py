@@ -1,6 +1,8 @@
 import io
 import os
 import sqlite3
+import json
+import google.generativeai as genai
 from typing import List, Optional
 from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
@@ -327,43 +329,61 @@ def sugerir_pontes_alimentares_ia(paciente_id: int):
         return {
             "paciente_id": paciente_id,
             "sugestoes": [],
-            "mensagem": "Cadastre pelo menos 1 alimento no 'Repertório Seguro' para ativar as Pontes Sensoriais."
+            "mensagem": "Cadastre pelo menos 1 alimento no 'Repertório Seguro' para ativar a IA."
         }
 
-    sugestoes = []
-    alimentos_ja_sugeridos = set() # Memória para evitar sugestões duplicadas na tela
+    # 1. Preparar a lista de alimentos que a criança já aceita
+    lista_seguros = []
+    for item in alimentos_seguros:
+        lista_seguros.append(f"- {item[0]} (Textura: {item[1]}, Sabor: {item[2]}, Cor: {item[3]}, Temperatura: {item[4]})")
+    texto_seguros = "\n".join(lista_seguros)
 
-    for seguro in alimentos_seguros:
-        nome_seguro, text_s, sab_s, cor_s, temp_s = seguro[0], seguro[1], seguro[2], seguro[3], seguro[4]
+    # 2. Criar o Prompt (A instrução clínica para o cérebro da IA)
+    prompt = f"""
+    És um Nutricionista Pediátrico especialista em Terapia Alimentar, Seletividade e Autismo (TEA).
+    O paciente aceita APENAS os seguintes alimentos de forma segura:
+    {texto_seguros}
+
+    Baseado no conceito de "Food Chaining" (Pontes Alimentares), sugira 3 novos alimentos para introduzir na dieta.
+    A regra principal é: O novo alimento DEVE ter a mesma TEXTURA e SABOR de um dos alimentos seguros. 
+    
+    Devolve EXATAMENTE no formato JSON abaixo, sem texto extra antes ou depois, e sem formatação markdown:
+    [
+      {{
+        "baseado_em": "Nome do alimento seguro",
+        "sugestao_alimento": "Novo alimento",
+        "afinidade_score": "Porcentagem (ex: 90%)",
+        "propriedades": "Textura | Sabor | Cor",
+        "justificativa_clinica": "Por que esta ponte funciona a nível sensorial e motor"
+      }}
+    ]
+    """
+
+    # 3. Chamar o Google Gemini
+    try:
+        # Puxa a chave de segurança que vamos configurar no Render
+        genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
-        for opcao in BANCO_ALIMENTOS_IA:
-            score = 0
-            # Textura agora vale muito mais pontos, pois é crucial na terapia alimentar
-            if opcao["textura"] == text_s: score += 4 
-            if opcao["sabor"] == sab_s: score += 3
-            if opcao["cor"] == cor_s: score += 2
-            if opcao["temperatura"] == temp_s: score += 1
-
-            # Aumentámos a exigência para 7 pontos (ex: Tem de ter Textura + Sabor idênticos)
-            if score >= 7 and opcao["alimento"] not in alimentos_ja_sugeridos:
-                sugestoes.append({
-                    "baseado_em": nome_seguro,
-                    "sugestao_alimento": opcao["alimento"],
-                    "afinidade_score": f"{int((score/10)*100)}%",
-                    "propriedades": f"{opcao['textura']} | {opcao['sabor']} | {opcao['cor']}",
-                    "justificativa_clinica": opcao["justificativa"]
-                })
-                alimentos_ja_sugeridos.add(opcao["alimento"])
-
-    if not sugestoes:
+        response = model.generate_content(prompt)
+        
+        # Limpar qualquer formatação indesejada que a IA possa adicionar e converter para JSON
+        texto_resposta = response.text.replace("```json", "").replace("```", "").strip()
+        sugestoes_geradas = json.loads(texto_resposta)
+        
+        return {
+            "paciente_id": paciente_id, 
+            "total_sugestoes": len(sugestoes_geradas), 
+            "sugestoes": sugestoes_geradas
+        }
+        
+    except Exception as e:
         return {
             "paciente_id": paciente_id,
             "total_sugestoes": 0,
             "sugestoes": [],
-            "mensagem": "Ainda não encontrámos uma ponte perfeita na nossa base para estes alimentos. Tente adicionar mais opções ao repertório!"
+            "mensagem": f"Ocorreu um erro ao comunicar com a IA: {str(e)}"
         }
-
-    return {"paciente_id": paciente_id, "total_sugestoes": len(sugestoes), "sugestoes": sugestoes}
 
 
 # --- SOLICITAÇÃO DE INSUMOS & ALERTAS ---
