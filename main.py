@@ -327,30 +327,44 @@ def sugerir_pontes_alimentares_ia(paciente_id: int):
         return {
             "paciente_id": paciente_id,
             "sugestoes": [],
-            "mensagem": "Cadastre pelo menos 1 alimento no 'Repertório Seguro' para ativar a Inteligência Artificial Sensorial."
+            "mensagem": "Cadastre pelo menos 1 alimento no 'Repertório Seguro' para ativar as Pontes Sensoriais."
         }
 
     sugestoes = []
+    alimentos_ja_sugeridos = set() # Memória para evitar sugestões duplicadas na tela
+
     for seguro in alimentos_seguros:
         nome_seguro, text_s, sab_s, cor_s, temp_s = seguro[0], seguro[1], seguro[2], seguro[3], seguro[4]
         
         for opcao in BANCO_ALIMENTOS_IA:
             score = 0
-            if opcao["textura"] == text_s: score += 3
-            if opcao["sabor"] == sab_s: score += 2
+            # Textura agora vale muito mais pontos, pois é crucial na terapia alimentar
+            if opcao["textura"] == text_s: score += 4 
+            if opcao["sabor"] == sab_s: score += 3
             if opcao["cor"] == cor_s: score += 2
             if opcao["temperatura"] == temp_s: score += 1
 
-            if score >= 4:
+            # Aumentámos a exigência para 7 pontos (ex: Tem de ter Textura + Sabor idênticos)
+            if score >= 7 and opcao["alimento"] not in alimentos_ja_sugeridos:
                 sugestoes.append({
                     "baseado_em": nome_seguro,
                     "sugestao_alimento": opcao["alimento"],
-                    "afinidade_score": f"{int((score/8)*100)}%",
+                    "afinidade_score": f"{int((score/10)*100)}%",
                     "propriedades": f"{opcao['textura']} | {opcao['sabor']} | {opcao['cor']}",
                     "justificativa_clinica": opcao["justificativa"]
                 })
+                alimentos_ja_sugeridos.add(opcao["alimento"])
+
+    if not sugestoes:
+        return {
+            "paciente_id": paciente_id,
+            "total_sugestoes": 0,
+            "sugestoes": [],
+            "mensagem": "Ainda não encontrámos uma ponte perfeita na nossa base para estes alimentos. Tente adicionar mais opções ao repertório!"
+        }
 
     return {"paciente_id": paciente_id, "total_sugestoes": len(sugestoes), "sugestoes": sugestoes}
+
 
 # --- SOLICITAÇÃO DE INSUMOS & ALERTAS ---
 @app.post("/insumos/solicitar/")
