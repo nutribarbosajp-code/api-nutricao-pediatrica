@@ -5,3 +5,4 @@ requests
 streamlit
 reportlab
 python-multipart
+google-generativeai
