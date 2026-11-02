@@ -586,3 +586,5 @@ def gerar_relatorio_pdf(paciente_id: int):
     doc.build(story)
     buffer.seek(0)
     return StreamingResponse(buffer, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=Relatorio_{nome}.pdf"})
+
+ 
