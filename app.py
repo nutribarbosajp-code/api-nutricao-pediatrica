@@ -322,4 +322,219 @@ elif menu == "Recordatório 24h":
                     res = requests.post(f"{API_URL}/recordatorio/", json=payload)
                     if res.status_code == 200:
                         st.success("Item adicionado ao Recordatório com sucesso!")
-                except Exception as e: st.error(f"Erro: {e}")
+                except Exception as e:
+                    st.error(f"Erro de conexão: {e}")
+                    
+    with tab_ver_rec:
+        st.subheader("Histórico do Recordatório 24h")
+        if st.button("Atualizar e Visualizar Registos"):
+            try:
+                res = requests.get(f"{API_URL}/recordatorio/{paciente_id}")
+                if res.status_code == 200:
+                    registros = res.json()
+                    if registros:
+                        st.dataframe(registros, use_container_width=True)
+                    else:
+                        st.info("Nenhum registo de recordatório encontrado para este paciente.")
+            except Exception as e:
+                st.error(f"Erro de conexão: {e}")
+
+# --- ABA 4: REPERTÓRIO ALIMENTAR & SUGESTÕES IA 🤖 ---
+elif menu == "Repertório & Sugestões IA 🤖":
+    st.header("🧠 Mapeamento Sensorial e Sugestões de Pontes por IA")
+    paciente_id = st.number_input("ID do Paciente", min_value=1, step=1, value=1, key="rep_id")
+    tab_cad, tab_ia = st.tabs(["📌 Registar Alimentos no Repertório", "🤖 Motor de IA (Pontes Alimentares)"])
+    
+    with tab_cad:
+        st.subheader("Mapear Propriedades Sensoriais dos Alimentos")
+        alim_nome = st.text_input("Nome do Alimento", placeholder="Ex: Batata Frita")
+        
+        status_alim = st.selectbox("Status no Tratamento", ["seguro", "em_trabalho", "recusado"])
+        passo_escada = None
+        if status_alim == "em_trabalho":
+            passo_escada = st.selectbox("Etapa na Escada do Comer", 
+                ["1. Tolerar", "2. Interagir", "3. Cheirar", "4. Tocar", "5. Provar", "6. Comer"]
+            )
+            
+        c1, c2, c3, c4 = st.columns(4)
+        with c1: text_opt = st.selectbox("Textura", ["Crocante", "Macio", "Pastoso", "Liquido", "Seco"])
+        with c2: sab_opt = st.selectbox("Sabor", ["Salgado", "Doce", "Azedo", "Neutro"])
+        with c3: cor_opt = st.text_input("Cor Dominante", placeholder="Ex: Vermelho vibrante")
+        with c4: temp_opt = st.selectbox("Temperatura", ["Quente", "Morno", "Frio", "Gelado"])
+        
+        if st.button("Adicionar ao Repertório"):
+            status_final = f"em_trabalho ({passo_escada})" if status_alim == "em_trabalho" else status_alim
+            payload = {
+                "paciente_id": paciente_id,
+                "alimento": alim_nome,
+                "status": status_final,
+                "textura": text_opt,
+                "sabor": sab_opt,
+                "cor": cor_opt,
+                "temperatura": temp_opt
+            }
+            try:
+                res = requests.post(f"{API_URL}/repertorio/", json=payload)
+                if res.status_code == 200:
+                    st.success("Alimento registado no repertório sensorial!")
+            except Exception as e:
+                st.error(f"Erro de conexão: {e}")
+
+    with tab_ia:
+        st.subheader("💡 Algoritmo de Pontes Alimentares (Food Chaining)")
+        st.caption("A IA compara os atributos dos alimentos que a criança aceita com segurança para indicar os próximos passos terapêuticos.")
+        
+        if st.button("Gerar Sugestões de Pontes com IA"):
+            try:
+                res = requests.get(f"{API_URL}/ia/sugerir-pontes/{paciente_id}")
+                if res.status_code == 200:
+                    dados_ia = res.json()
+                    if dados_ia["sugestoes"]:
+                        st.success(f"{dados_ia['total_sugestoes']} sugestão(ões) gerada(s) com sucesso!")
+                        for sug in dados_ia["sugestoes"]:
+                            with st.expander(f"🎯 Sugestão: {sug['sugestao_alimento']} (Afinidade: {sug['afinidade_score']})"):
+                                st.write(f"**Baseado no alimento seguro:** {sug['baseado_em']}")
+                                st.write(f"**Propriedades em comum:** {sug['propriedades']}")
+                                st.info(f"**Justificativa Clínica:** {sug['justificativa_clinica']}")
+                    else:
+                        st.warning(dados_ia.get("mensagem", "Nenhuma ponte encontrada."))
+            except Exception as e:
+                st.error(f"Erro de conexão: {e}")
+
+# --- ABA 5: INSUMOS DA SESSÃO 🧺 ---
+elif menu == "Insumos da Sessão 🧺":
+    st.header("🧺 Solicitação de Alimentos para Consulta & Lembretes")
+    
+    try:
+        res_alertas = requests.get(f"{API_URL}/insumos/alertas-pendentes/")
+        if res_alertas.status_code == 200:
+            dados_alertas = res_alertas.json()
+            if dados_alertas["total_alertas"] > 0:
+                st.warning("🔔 **Lembrete Clínico:** Pacientes sem alimentos solicitados para a próxima sessão:")
+                for alerte in dados_alertas["alertas"]:
+                    st.caption(f"⚠️ {alerte['mensagem']}")
+    except Exception as e:
+        pass
+
+    st.divider()
+    paciente_id = st.number_input("ID do Paciente", min_value=1, step=1, value=1, key="ins_id")
+    tab_solicitar, tab_pais_insumos = st.tabs(["👨‍⚕️ Solicitar Alimentos (Terapeuta)", "👨‍👩‍👧 Lista da Próxima Sessão (Pais)"])
+    
+    with tab_solicitar:
+        st.subheader("Cadastrar Lista de Insumos para a Próxima Terapia")
+        data_sessao = st.date_input("Data da Próxima Sessão")
+        alimentos_req = st.text_area("Alimentos Necessários:", placeholder="Ex: 1 Maçã Fuji, 1 pacote de Biscoito de Polvilho")
+        instrucoes = st.text_input("Instruções de Higiene / Corte:", placeholder="Ex: Trazer cortado em rodelas num pote fechado")
+        
+        col_lembrete, col_hora = st.columns(2)
+        with col_lembrete:
+            lembrete = st.selectbox("Frequência do Lembrete", ["24h antes da sessão", "48h antes da sessão", "Na manhã da sessão"])
+        with col_hora:
+            hora_lembrete = st.time_input("Horário exato da notificação")
+            
+        if st.button("Enviar Solicitação com Lembretes"):
+            lembrete_final = f"{lembrete} às {hora_lembrete.strftime('%H:%M')}"
+            payload = {
+                "paciente_id": paciente_id,
+                "data_consulta": str(data_sessao),
+                "alimentos_solicitados": alimentos_req,
+                "orientacoes_preparo": instrucoes,
+                "lembrete_config": lembrete_final
+            }
+            try:
+                res = requests.post(f"{API_URL}/insumos/solicitar/", json=payload)
+                if res.status_code == 200:
+                    st.success("Solicitação enviada e lembretes programados com sucesso!")
+            except Exception as e:
+                st.error(f"Erro de conexão: {e}")
+
+    with tab_pais_insumos:
+        st.subheader("📌 Alimentos a Levar na Próxima Consulta")
+        try:
+            res = requests.get(f"{API_URL}/insumos/paciente/{paciente_id}")
+            if res.status_code == 200:
+                lista = res.json()
+                if lista:
+                    for item in lista:
+                        st.info(f"📅 **Sessão do Dia:** {item['data_consulta']}")
+                        st.write(f"🍏 **Alimentos:** {item['alimentos']}")
+                        st.write(f"💡 **Como preparar/trazer:** {item['orientacoes']}")
+                        st.caption(f"⏰ Lembrete configurado: {item['lembrete']}")
+                        if item['status'] == 'confirmado_pais':
+                            st.success("✅ A família já confirmou que separou estes alimentos!")
+                        else:
+                            if st.button(f"Marcar como Separado / Comprado (Item #{item['id']})", key=f"btn_sup_{item['id']}"):
+                                res_conf = requests.post(f"{API_URL}/insumos/confirmar/{item['id']}")
+                                if res_conf.status_code == 200:
+                                    st.success("Confirmado! O terapeuta já foi notificado.")
+                                    st.rerun()
+                        st.divider()
+                else:
+                    st.write("Nenhuma solicitação de alimento pendente para a próxima sessão.")
+        except Exception as e:
+            st.error(f"Erro de conexão: {e}")
+
+# --- ABA 6: DIÁRIO SENSORIAL & FOTOS ---
+elif menu == "Diário Sensorial & Fotos":
+    st.header("📸 Acompanhamento Família <-> Terapeuta")
+    paciente_id = st.number_input("ID do Paciente", min_value=1, step=1, value=1, key="com_id")
+    tab_prof, tab_fam = st.tabs(["👨‍⚕️ Prescrever Tarefa", "👨‍👩‍👧 Enviar Foto (Família)"])
+    
+    with tab_prof:
+        orientacao = st.text_area("Orientação de Casa:")
+        if st.button("Enviar Tarefa"):
+            try:
+                res = requests.post(f"{API_URL}/comunicacao/prescrever-tarefa/", json={"paciente_id": paciente_id, "orientacao_tarefa": orientacao})
+                if res.status_code == 200: st.success("Tarefa enviada!")
+            except Exception as e: st.error(f"Erro: {e}")
+
+    with tab_fam:
+        comentario = st.text_input("Comentário sobre a experiência:")
+        reacao = st.selectbox("Reação", ["Tolerou (No prato / Perto)", "Tocou", "Cheirou", "Beijou", "Lambeu", "Colocou na boca / Provou", "Comeu / Ingeriu", "Recusou / Cuspiu"])
+        foto_upload = st.file_uploader("Foto da Interação", type=["jpg", "jpeg", "png"])
+        if st.button("Enviar Registro"):
+            files = {"foto": (foto_upload.name, foto_upload.getvalue(), foto_upload.type)} if foto_upload else None
+            data = {"paciente_id": paciente_id, "comentario_pais": comentario, "nivel_reacao": reacao}
+            try:
+                res = requests.post(f"{API_URL}/comunicacao/registrar-oferta-familia/", data=data, files=files)
+                if res.status_code == 200: st.success("Registro enviado!")
+            except Exception as e: st.error(f"Erro: {e}")
+
+    st.markdown("---")
+    if st.button("Carregar Feed"):
+        try:
+            res = requests.get(f"{API_URL}/comunicacao/historico/{paciente_id}")
+            if res.status_code == 200:
+                for item in res.json()["feed"]:
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.markdown(f"**[{item['data']}] {'👨‍⚕️ Profissional' if item['enviado_por'] == 'profissional' else '👨‍👩‍👧 Família'}**")
+                        st.write(f"**Mensagem:** {item['mensagem']}")
+                        st.caption(f"Status: {item['nivel_reacao']}")
+                    with col2:
+                        if item["foto_url"]: st.image(f"{API_URL}{item['foto_url']}", width=150)
+                    st.divider()
+        except Exception as e: st.error(f"Erro: {e}")
+
+# --- ABA 7: EMITIR LAUDO PDF ---
+elif menu == "Emitir Laudo PDF":
+    st.header("📄 Emitir Laudo Clínico em PDF")
+    paciente_id_pdf = st.number_input("ID do Paciente para Laudo", min_value=1, step=1, value=1, key="pdf_id")
+    
+    st.markdown("Aceda e descarregue o relatório clínico completo contendo a antropometria OMS, distribuição de macronutrientes, TMB/GET, resumo da anamnese e repertório alimentar.")
+    
+    if st.button("Gerar e Descarregar Laudo PDF"):
+        try:
+            pdf_res = requests.get(f"{API_URL}/pacientes/{paciente_id_pdf}/relatorio-pdf")
+            if pdf_res.status_code == 200:
+                st.success("Relatório gerado com sucesso!")
+                st.download_button(
+                    label="📥 Clique aqui para guardar o Laudo em PDF", 
+                    data=pdf_res.content, 
+                    file_name=f"Relatorio_Clinico_Paciente_{paciente_id_pdf}.pdf", 
+                    mime="application/pdf"
+                )
+            else:
+                st.error("Erro ao gerar o relatório. Verifique se o ID do paciente existe.")
+        except Exception as e: 
+            st.error(f"Erro de conexão: {e}")
