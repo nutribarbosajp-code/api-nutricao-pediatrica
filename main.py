@@ -16,6 +16,8 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
+
+
 # 1. INSTÂNCIA DO FASTAPI
 app = FastAPI(
     title="API de Nutrição Pediátrica & IA Sensorial",
