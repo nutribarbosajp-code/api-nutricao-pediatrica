@@ -93,6 +93,23 @@ def inicializar_banco():
         sono_medicacoes TEXT,
         opiniao_pais TEXT,
         observacoes TEXT,
+                -- Novos campos adicionados das imagens:
+        habito_movimentar TEXT,
+        habito_concentracao TEXT,
+        comportamento_diario_comer TEXT,
+        padrao_mastigacao TEXT,
+        utensilios_usados TEXT,
+        frequencia_cafe_manha TEXT,
+        freq_frutas TEXT,
+        freq_verduras TEXT,
+        freq_legumes TEXT,
+        freq_industrializados TEXT,
+        freq_refrigerante TEXT,
+        freq_frituras TEXT,
+        freq_carnes TEXT,
+        freq_leite_derivados TEXT,
+        refeicoes_por_dia TEXT,
+        consumo_agua TEXT,
         FOREIGN KEY (paciente_id) REFERENCES pacientes (id)
     )
     """)
@@ -182,6 +199,23 @@ class AnamneseSchema(BaseModel):
     sono_medicacoes: Optional[str] = None
     opiniao_pais: Optional[str] = None
     observacoes: Optional[str] = None
+    # Novos campos:
+    habito_movimentar: Optional[str] = None
+    habito_concentracao: Optional[str] = None
+    comportamento_diario_comer: Optional[str] = None
+    padrao_mastigacao: Optional[str] = None
+    utensilios_usados: Optional[str] = None
+    frequencia_cafe_manha: Optional[str] = None
+    freq_frutas: Optional[str] = None
+    freq_verduras: Optional[str] = None
+    freq_legumes: Optional[str] = None
+    freq_industrializados: Optional[str] = None
+    freq_refrigerante: Optional[str] = None
+    freq_frituras: Optional[str] = None
+    freq_carnes: Optional[str] = None
+    freq_leite_derivados: Optional[str] = None
+    refeicoes_por_dia: Optional[str] = None
+    consumo_agua: Optional[str] = None
 
 class RecordatorioItem(BaseModel):
     paciente_id: int
