@@ -110,27 +110,122 @@ elif menu == "Cadastrar Paciente":
 
 # --- ABA 2: FICHA DE ANAMNESE ---
 elif menu == "Ficha de Anamnese":
-    st.header("📝 Ficha de Anamnese Pediátrica & Sensorial")
+    st.header("📝 Ficha de Anamnese Alimentar Infantil (Completa)")
+    
     paciente_id = st.number_input("ID do Paciente", min_value=1, step=1, value=1, key="ana_id")
-    with st.form("form_anamnese"):
-        historico = st.text_area("Histórico Clínico / Diagnósticos (ex: TEA, TDAH, APLV):")
-        comportamento = st.text_area("Comportamento na Mesa / Recusas Principais:")
-        marcas = st.text_input("Exige Marcas/Embalagens Específicas? Se sim, quais?")
-        ambiente = st.text_input("Ambiente das Refeições (ex: come no sofá, com telas):")
-        if st.form_submit_button("Guardar Anamnese"):
+    
+    # Botão para carregar anamnese existente
+    if st.button("Carregar Anamnese do Paciente"):
+        try:
+            res_get = requests.get(f"{API_URL}/anamnese/{paciente_id}")
+            if res_get.status_code == 200:
+                dados = res_get.json().get("anamnese")
+                if dados:
+                    st.success("Ficha de Anamnese encontrada!")
+                    st.json(dados) # Mostra todos os detalhes guardados
+                else:
+                    st.warning("Ainda não existe ficha registada para este paciente.")
+        except Exception as e:
+            st.error(f"Erro ao buscar anamnese: {e}")
+            
+    st.markdown("---")
+    
+    with st.form("form_anamnese_completa"):
+        st.subheader("1. Identificação e Dados Gerais")
+        c1, c2, c3 = st.columns(3)
+        with c1: nome_resp = st.text_input("Nome da Mãe / Responsável")
+        with c2: tel_resp = st.text_input("Telefone do Responsável")
+        with c3: sexo_crianca = st.selectbox("Sexo", ["Feminino", "Masculino"])
+        
+        c4, c5 = st.columns(2)
+        with c4: dt_nasc = st.text_input("Data de Nascimento", placeholder="DD/MM/AAAA")
+        with c5: pediatra = st.text_input("Nome do Pediatra / Acompanhamento")
+
+        st.subheader("2. Antecedentes Gestacionais e Parto")
+        gestacao_planejada = st.selectbox("A gestação foi planejada?", ["Sim", "Não"])
+        intercorrencias_gestacao = st.text_input("Intercorrencias na gestação / Medicação / Suplementos / HASG / Diabetes Gestacional")
+        c6, c7 = st.columns(2)
+        with c6: idade_gest = st.text_input("Idade Gestacional (semanas/dias)")
+        with c7: tipo_parto = st.selectbox("Tipo de Parto", ["Cesária", "Natural/Normal"])
+
+        st.subheader("3. Introdução Alimentar e Histórico Pretérito")
+        c8, c9, c10 = st.columns(3)
+        with c8: amamentado = st.selectbox("Foi amamentado?", ["Sim", "Não"])
+        with c9: tempo_amam = st.text_input("Quanto tempo de amamentação?")
+        with c10: inicio_ia = st.text_input("Início da Introdução Alimentar (meses)")
+        
+        c11, c12 = st.columns(2)
+        with c11: metodo_ia = st.selectbox("Método de Introdução Alimentar", ["Tradicional", "Misto", "BLW"])
+        with c12: uso_mamadeira = st.text_input("Fez uso de mamadeira? Por quanto tempo?")
+        
+        intercorr_ia = st.text_area("Houve intercorrências na introdução alimentar?")
+
+        st.subheader("4. Aspectos Clínicos, Funcionais e Histórico Familiar")
+        doencas = st.text_input("Doenças existentes / Condições clínicas")
+        medicacoes = st.text_input("Em uso de medicação ou suplementação?")
+        alergias = st.text_input("Alergias conhecidas ou alimentares (tipo de expressão alérgica)")
+        hist_familiar = st.text_input("Histórico Familiar (Diabetes, Obesidade, Hipertensão, Cardiopatia, etc.)")
+        
+        st.subheader("5. Hábitos e Comportamento Alimentar Atual")
+        comportamentos_alim = st.multiselect(
+            "Comportamentos Alimentares Presentes:",
+            ["Seletividade alimentar", "Compulsão alimentar", "PICA", "Comportamento ritualístico", "Comportamento alimentar rígido", "Só come distraído/com telas", "Exige incentivo de adulto"]
+        )
+        produtos_ind = st.text_input("Consumo de industrializados / corantes (frequência e quais)")
+        preferencias = st.text_area("Preferências e Aversões Alimentares (Texturas, cores, marcas específicas)")
+        ambiente = st.text_input("Ambiente das refeições (ex: Come à mesa com a família, assistindo à TV)")
+
+        st.subheader("6. Avaliação Gastrointestinal e Clínico-Geral")
+        c13, c14 = st.columns(2)
+        with c13: intestino = st.selectbox("Funcionamento Intestinal", ["Diário", "2 a 3 vezes por semana", "1 vez por semana", "Constipado", "Diarreia frequente"])
+        with c14: bristol = st.selectbox("Escala de Bristol / Aspeto das Fezes", ["Tipo 1-2 (Constipação)", "Tipo 3-4 (Normal/Ideal)", "Tipo 5-7 (Diarreia/Amolescida)", "Presença de muco ou sangue"])
+        
+        sintomas_gastro = st.text_input("Sintomas (Distensão abdominal, refluxo, muitos gases forte, prurido)")
+        sono_habitos = st.text_input("Qualidade do Sono")
+
+        st.subheader("7. Expectativa e Opinião dos Pais")
+        opiniao = st.text_area("No que a Terapia Nutricional pode ajudar? Qual a expectativa e quais alimentos gostaria de introduzir?")
+        obs_geral = st.text_area("Observações importantes do Terapeuta")
+
+        if st.form_submit_button("Guardar Ficha de Anamnese Completa"):
             payload = {
                 "paciente_id": paciente_id,
-                "historico_clinico": historico,
-                "comportamento_refeicao": comportamento,
-                "marcas_especificas": marcas,
-                "ambiente_refeicao": ambiente
+                "nome_responsavel": nome_resp,
+                "telefone_responsavel": tel_resp,
+                "sexo": sexo_crianca,
+                "data_nascimento": dt_nasc,
+                "acompanhamento_pediatra": pediatra,
+                "gestacao_planejada": gestacao_planejada,
+                "intercorrencias_gestacao": intercorrencias_gestacao,
+                "idade_gestacional": idade_gest,
+                "tipo_parto": tipo_parto,
+                "amamentacao": amamentado,
+                "tempo_amamentacao": tempo_amam,
+                "inicio_ia": inicio_ia,
+                "metodo_ia": metodo_ia,
+                "uso_mamadeira": uso_mamadeira,
+                "intercorrencias_ia": intercorr_ia,
+                "doencas_existentes": doencas,
+                "medicacoes": medicacoes,
+                "alergias": alergias,
+                "historico_familiar": hist_familiar,
+                "comportamentos_alimentares": ", ".join(comportamentos_alim),
+                "produtos_industrializados": produtos_ind,
+                "preferencias_aversoes": preferencias,
+                "ambiente_refeicao": ambiente,
+                "funcionamento_intestinal": intestino,
+                "escala_bristol": bristol,
+                "sintomas_gastrointestinais": sintomas_gastro,
+                "sono_medicacoes": sono_habitos,
+                "opiniao_pais": opiniao,
+                "observacoes": obs_geral
             }
             try:
                 res = requests.post(f"{API_URL}/anamnese/", json=payload)
                 if res.status_code == 200:
-                    st.success("Ficha de Anamnese guardada com sucesso!")
+                    st.success("Ficha de Anamnese completa guardada com sucesso!")
             except Exception as e:
-                st.error(f"Erro de conexão: {e}")
+                st.error(f"Erro ao guardar: {e}")
 
 # --- ABA 3: RECORDATÓRIO 24H ---
 elif menu == "Recordatório 24h":

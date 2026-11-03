@@ -16,12 +16,10 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-
-
 # 1. INSTÂNCIA DO FASTAPI
 app = FastAPI(
     title="API de Nutrição Pediátrica & IA Sensorial",
-    description="Plataforma clínica completa com gestão de insumos, alertas, anamnese, recordatório 24h e IA para pontes alimentares."
+    description="Plataforma clínica completa com gestão de insumos, alertas, anamnese detalhada e IA para pontes alimentares."
 )
 
 UPLOAD_DIR = "uploads_fotos"
@@ -35,87 +33,111 @@ def inicializar_banco():
     
     # Tabela de Pacientes
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS pacientes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT NOT NULL,
-            idade_anos INTEGER NOT NULL,
-            peso_kg REAL NOT NULL,
-            altura_cm REAL NOT NULL,
-            tmb_kcal REAL NOT NULL,
-            tdee_kcal REAL NOT NULL,
-            agua_ml REAL NOT NULL
-        )
+    CREATE TABLE IF NOT EXISTS pacientes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT NOT NULL,
+        idade_anos INTEGER NOT NULL,
+        peso_kg REAL NOT NULL,
+        altura_cm REAL NOT NULL,
+        tmb_kcal REAL NOT NULL,
+        tdee_kcal REAL NOT NULL,
+        agua_ml REAL NOT NULL
+    )
     """)
     
     # Tabela de Comunicação e Diário Sensorial
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS atividades_comunicacao (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            paciente_id INTEGER NOT NULL,
-            data_registro TEXT NOT NULL,
-            remetente TEXT NOT NULL,
-            mensagem_tarefa TEXT NOT NULL,
-            nivel_reacao TEXT,
-            caminho_foto TEXT,
-            FOREIGN KEY (paciente_id) REFERENCES pacientes (id)
-        )
+    CREATE TABLE IF NOT EXISTS atividades_comunicacao (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        paciente_id INTEGER NOT NULL,
+        data_registro TEXT NOT NULL,
+        remetente TEXT NOT NULL,
+        mensagem_tarefa TEXT NOT NULL,
+        nivel_reacao TEXT,
+        caminho_foto TEXT,
+        FOREIGN KEY (paciente_id) REFERENCES pacientes (id)
+    )
     """)
     
-    # Tabela de Anamnese Pediátrica & Sensorial
+    # Tabela de Anamnese Pediátrica & Sensorial (Atualizada com os novos campos dos modelos)
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS anamnese (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            paciente_id INTEGER NOT NULL UNIQUE,
-            historico_clinico TEXT,
-            comportamento_refeicao TEXT,
-            marcas_especificas TEXT,
-            ambiente_refeicao TEXT,
-            FOREIGN KEY (paciente_id) REFERENCES pacientes (id)
-        )
+    CREATE TABLE IF NOT EXISTS anamnese (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        paciente_id INTEGER NOT NULL UNIQUE,
+        nome_responsavel TEXT,
+        telefone_responsavel TEXT,
+        sexo TEXT,
+        data_nascimento TEXT,
+        acompanhamento_pediatra TEXT,
+        gestacao_planejada TEXT,
+        intercorrencias_gestacao TEXT,
+        idade_gestacional TEXT,
+        tipo_parto TEXT,
+        amamentacao TEXT,
+        tempo_amamentacao TEXT,
+        inicio_ia TEXT,
+        metodo_ia TEXT,
+        uso_mamadeira TEXT,
+        intercorrencias_ia TEXT,
+        doencas_existentes TEXT,
+        medicacoes TEXT,
+        alergias TEXT,
+        historico_familiar TEXT,
+        comportamentos_alimentares TEXT,
+        produtos_industrializados TEXT,
+        preferencias_aversoes TEXT,
+        ambiente_refeicao TEXT,
+        funcionamento_intestinal TEXT,
+        escala_bristol TEXT,
+        sintomas_gastrointestinais TEXT,
+        sono_medicacoes TEXT,
+        opiniao_pais TEXT,
+        observacoes TEXT,
+        FOREIGN KEY (paciente_id) REFERENCES pacientes (id)
+    )
     """)
     
     # Tabela de Recordatório 24h
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS recordatorio (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            paciente_id INTEGER NOT NULL,
-            refeicao TEXT NOT NULL,
-            alimento TEXT NOT NULL,
-            quantidade TEXT NOT NULL,
-            data_registro TEXT NOT NULL,
-            FOREIGN KEY (paciente_id) REFERENCES pacientes (id)
-        )
+    CREATE TABLE IF NOT EXISTS recordatorio (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        paciente_id INTEGER NOT NULL,
+        refeicao TEXT NOT NULL,
+        alimento TEXT NOT NULL,
+        quantidade TEXT NOT NULL,
+        data_registro TEXT NOT NULL,
+        FOREIGN KEY (paciente_id) REFERENCES pacientes (id)
+    )
     """)
     
     # Tabela de Repertório Alimentar
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS repertorio_alimentar (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            paciente_id INTEGER NOT NULL,
-            alimento TEXT NOT NULL,
-            status TEXT NOT NULL,
-            textura TEXT NOT NULL,
-            sabor TEXT NOT NULL,
-            cor TEXT NOT NULL,
-            temperatura TEXT NOT NULL,
-            FOREIGN KEY (paciente_id) REFERENCES pacientes (id)
-        )
+    CREATE TABLE IF NOT EXISTS repertorio_alimentar (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        paciente_id INTEGER NOT NULL,
+        alimento TEXT NOT NULL,
+        status TEXT NOT NULL,
+        textura TEXT NOT NULL,
+        sabor TEXT NOT NULL,
+        cor TEXT NOT NULL,
+        temperatura TEXT NOT NULL,
+        FOREIGN KEY (paciente_id) REFERENCES pacientes (id)
+    )
     """)
 
     # Tabela de Solicitação de Insumos / Alimentos para Sessão
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS solicitacoes_insumos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            paciente_id INTEGER NOT NULL,
-            data_consulta TEXT NOT NULL,
-            alimentos_solicitados TEXT NOT NULL,
-            orientacoes_preparo TEXT,
-            status TEXT DEFAULT 'pendente',
-            lembrete_config TEXT NOT NULL,
-            FOREIGN KEY (paciente_id) REFERENCES pacientes (id)
-        )
+    CREATE TABLE IF NOT EXISTS solicitacoes_insumos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        paciente_id INTEGER NOT NULL,
+        data_consulta TEXT NOT NULL,
+        alimentos_solicitados TEXT NOT NULL,
+        orientacoes_preparo TEXT,
+        status TEXT DEFAULT 'pendente',
+        lembrete_config TEXT NOT NULL,
+        FOREIGN KEY (paciente_id) REFERENCES pacientes (id)
+    )
     """)
-    
     conn.commit()
     conn.close()
 
@@ -131,10 +153,35 @@ class PacientePediatrico(BaseModel):
 
 class AnamneseSchema(BaseModel):
     paciente_id: int
-    historico_clinico: str
-    comportamento_refeicao: str
-    marcas_especificas: str
-    ambiente_refeicao: str
+    nome_responsavel: Optional[str] = None
+    telefone_responsavel: Optional[str] = None
+    sexo: Optional[str] = None
+    data_nascimento: Optional[str] = None
+    acompanhamento_pediatra: Optional[str] = None
+    gestacao_planejada: Optional[str] = None
+    intercorrencias_gestacao: Optional[str] = None
+    idade_gestacional: Optional[str] = None
+    tipo_parto: Optional[str] = None
+    amamentacao: Optional[str] = None
+    tempo_amamentacao: Optional[str] = None
+    inicio_ia: Optional[str] = None
+    metodo_ia: Optional[str] = None
+    uso_mamadeira: Optional[str] = None
+    intercorrencias_ia: Optional[str] = None
+    doencas_existentes: Optional[str] = None
+    medicacoes: Optional[str] = None
+    alergias: Optional[str] = None
+    historico_familiar: Optional[str] = None
+    comportamentos_alimentares: Optional[str] = None
+    produtos_industrializados: Optional[str] = None
+    preferencias_aversoes: Optional[str] = None
+    ambiente_refeicao: Optional[str] = None
+    funcionamento_intestinal: Optional[str] = None
+    escala_bristol: Optional[str] = None
+    sintomas_gastrointestinais: Optional[str] = None
+    sono_medicacoes: Optional[str] = None
+    opiniao_pais: Optional[str] = None
+    observacoes: Optional[str] = None
 
 class RecordatorioItem(BaseModel):
     paciente_id: int
@@ -161,16 +208,6 @@ class SolicitacaoInsumoSchema(BaseModel):
     alimentos_solicitados: str
     orientacoes_preparo: str
     lembrete_config: str
-
-# --- BASE DE CONHECIMENTO DE PONTES ALIMENTARES (IA) ---
-BANCO_ALIMENTOS_IA = [
-    {"alimento": "Chips de Mandioquinha", "textura": "Crocante", "sabor": "Salgado", "cor": "Amarelo/Bege", "temperatura": "Morno", "justificativa": "Ponte sensorial perfeita para crianças que aceitam batata palha ou batata frita pela cor e crocância."},
-    {"alimento": "Biscoito de Polvilho", "textura": "Crocante", "sabor": "Salgado", "cor": "Amarelo/Bege", "temperatura": "Frio", "justificativa": "Mantém alta aceitabilidade tátil e oral sem gerar rejeição por umidade."},
-    {"alimento": "Cenoura assada em palito", "textura": "Crocante", "sabor": "Doce", "cor": "Laranja", "temperatura": "Morno", "justificativa": "Transição ideal a partir de salgadinhos crocantes amarelos para introduzir vegetais de cor quente."},
-    {"alimento": "Purê de Batata com Maçã cozida", "textura": "Pastoso", "sabor": "Doce", "cor": "Amarelo/Bege", "temperatura": "Morno", "justificativa": "Adaptação de textura macia/pastosa neutra para introdução de saborear frutas sem fibras aparentes."},
-    {"alimento": "Maçã seca desidratada", "textura": "Crocante", "sabor": "Doce", "cor": "Amarelo/Bege", "temperatura": "Frio", "justificativa": "Excelente ponte entre biscoitos doces industriais e a fruta in natura."},
-    {"alimento": "Brócolis empanado no forno", "textura": "Crocante", "sabor": "Salgado", "cor": "Verde", "temperatura": "Quente", "justificativa": "A casca crocante disfarça a textura interna do vegetal verde, facilitando o primeiro contato oral."}
-]
 
 # --- AUXILIARES E CALCULADORES CLÍNICOS ---
 def calcular_necessidade_hidrica(peso: float) -> float:
@@ -217,19 +254,18 @@ def avaliar_curva_crescimento_oms(peso_kg: float, altura_cm: float, idade_anos: 
 # --- ROTAS DA API ---
 @app.get("/")
 def home():
-    return {"mensagem": "API de Nutrição Pediátrica, IA Sensorial & Gestão de Insumos Ativa!"}
+    return {"mensagem": "API de Nutrição Pediátrica, IA Sensorial & Anamnese Completa Ativa!"}
 
 @app.post("/cadastrar-paciente/")
 def cadastrar_paciente(paciente: PacientePediatrico):
     tmb = (22.7 * paciente.peso_kg) + 495
     tdee = tmb * paciente.nivel_atividade
     agua_ml = calcular_necessidade_hidrica(paciente.peso_kg)
-    
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO pacientes (nome, idade_anos, peso_kg, altura_cm, tmb_kcal, tdee_kcal, agua_ml)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO pacientes (nome, idade_anos, peso_kg, altura_cm, tmb_kcal, tdee_kcal, agua_ml)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (paciente.nome, paciente.idade_anos, paciente.peso_kg, paciente.altura_cm, round(tmb, 2), round(tdee, 2), round(agua_ml, 2)))
     paciente_id = cursor.lastrowid
     conn.commit()
@@ -251,9 +287,24 @@ def salvar_anamnese(dados: AnamneseSchema):
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT OR REPLACE INTO anamnese (paciente_id, historico_clinico, comportamento_refeicao, marcas_especificas, ambiente_refeicao)
-        VALUES (?, ?, ?, ?, ?)
-    """, (dados.paciente_id, dados.historico_clinico, dados.comportamento_refeicao, dados.marcas_especificas, dados.ambiente_refeicao))
+    INSERT OR REPLACE INTO anamnese (
+        paciente_id, nome_responsavel, telefone_responsavel, sexo, data_nascimento,
+        acompanhamento_pediatra, gestacao_planejada, intercorrencias_gestacao, idade_gestacional,
+        tipo_parto, amamentacao, tempo_amamentacao, inicio_ia, metodo_ia, uso_mamadeira,
+        intercorrencias_ia, doencas_existentes, medicacoes, alergias, historico_familiar,
+        comportamentos_alimentares, produtos_industrializados, preferencias_aversoes,
+        ambiente_refeicao, funcionamento_intestinal, escala_bristol, sintomas_gastrointestinais,
+        sono_medicacoes, opiniao_pais, observacoes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        dados.paciente_id, dados.nome_responsavel, dados.telefone_responsavel, dados.sexo, dados.data_nascimento,
+        dados.acompanhamento_pediatra, dados.gestacao_planejada, dados.intercorrencias_gestacao, dados.idade_gestacional,
+        dados.tipo_parto, dados.amamentacao, dados.tempo_amamentacao, dados.inicio_ia, dados.metodo_ia, dados.uso_mamadeira,
+        dados.intercorrencias_ia, dados.doencas_existentes, dados.medicacoes, dados.alergias, dados.historico_familiar,
+        dados.comportamentos_alimentares, dados.produtos_industrializados, dados.preferencias_aversoes,
+        dados.ambiente_refeicao, dados.funcionamento_intestinal, dados.escala_bristol, dados.sintomas_gastrointestinais,
+        dados.sono_medicacoes, dados.opiniao_pais, dados.observacoes
+    ))
     conn.commit()
     conn.close()
     return {"mensagem": "Ficha de Anamnese salva com sucesso!"}
@@ -262,16 +313,31 @@ def salvar_anamnese(dados: AnamneseSchema):
 def obter_anamnese(paciente_id: int):
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT historico_clinico, comportamento_refeicao, marcas_especificas, ambiente_refeicao FROM anamnese WHERE paciente_id = ?", (paciente_id,))
+    cursor.execute("""
+    SELECT nome_responsavel, telefone_responsavel, sexo, data_nascimento, acompanhamento_pediatra,
+           gestacao_planejada, intercorrencias_gestacao, idade_gestacional, tipo_parto, amamentacao,
+           tempo_amamentacao, inicio_ia, metodo_ia, uso_mamadeira, intercorrencias_ia, doencas_existentes,
+           medicacoes, alergias, historico_familiar, comportamentos_alimentares, produtos_industrializados,
+           preferencias_aversoes, ambiente_refeicao, funcionamento_intestinal, escala_bristol,
+           sintomas_gastrointestinais, sono_medicacoes, opiniao_pais, observacoes
+    FROM anamnese WHERE paciente_id = ?
+    """, (paciente_id,))
     reg = cursor.fetchone()
     conn.close()
     if not reg:
         return {"anamnese": None}
+    
     return {
-        "historico_clinico": reg[0],
-        "comportamento_refeicao": reg[1],
-        "marcas_especificas": reg[2],
-        "ambiente_refeicao": reg[3]
+        "anamnese": {
+            "nome_responsavel": reg[0], "telefone_responsavel": reg[1], "sexo": reg[2], "data_nascimento": reg[3],
+            "acompanhamento_pediatra": reg[4], "gestacao_planejada": reg[5], "intercorrencias_gestacao": reg[6],
+            "idade_gestacional": reg[7], "tipo_parto": reg[8], "amamentacao": reg[9], "tempo_amamentacao": reg[10],
+            "inicio_ia": reg[11], "metodo_ia": reg[12], "uso_mamadeira": reg[13], "intercorrencias_ia": reg[14],
+            "doencas_existentes": reg[15], "medicacoes": reg[16], "alergias": reg[17], "historico_familiar": reg[18],
+            "comportamentos_alimentares": reg[19], "produtos_industrializados": reg[20], "preferencias_aversoes": reg[21],
+            "ambiente_refeicao": reg[22], "funcionamento_intestinal": reg[23], "escala_bristol": reg[24],
+            "sintomas_gastrointestinais": reg[25], "sono_medicacoes": reg[26], "opiniao_pais": reg[27], "observacoes": reg[28]
+        }
     }
 
 # --- RECORDATÓRIO 24H ---
@@ -281,8 +347,8 @@ def adicionar_item_recordatorio(item: RecordatorioItem):
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO recordatorio (paciente_id, refeicao, alimento, quantidade, data_registro)
-        VALUES (?, ?, ?, ?, ?)
+    INSERT INTO recordatorio (paciente_id, refeicao, alimento, quantidade, data_registro)
+    VALUES (?, ?, ?, ?, ?)
     """, (item.paciente_id, item.refeicao, item.alimento, item.quantidade, data_atual))
     conn.commit()
     conn.close()
@@ -303,8 +369,8 @@ def adicionar_alimento_repertorio(item: AlimentoRepertorioSchema):
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO repertorio_alimentar (paciente_id, alimento, status, textura, sabor, cor, temperatura)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO repertorio_alimentar (paciente_id, alimento, status, textura, sabor, cor, temperatura)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (item.paciente_id, item.alimento, item.status, item.textura, item.sabor, item.cor, item.temperatura))
     conn.commit()
     conn.close()
@@ -334,13 +400,11 @@ def sugerir_pontes_alimentares_ia(paciente_id: int):
             "mensagem": "Cadastre pelo menos 1 alimento no 'Repertório Seguro' para ativar a IA."
         }
 
-    # 1. Preparar a lista de alimentos que a criança já aceita
     lista_seguros = []
     for item in alimentos_seguros:
         lista_seguros.append(f"- {item[0]} (Textura: {item[1]}, Sabor: {item[2]}, Cor: {item[3]}, Temperatura: {item[4]})")
     texto_seguros = "\n".join(lista_seguros)
 
-    # 2. Criar o Prompt (A instrução clínica para o cérebro da IA)
     prompt = f"""
     És um Nutricionista Pediátrico especialista em Terapia Alimentar, Seletividade e Autismo (TEA).
     O paciente aceita APENAS os seguintes alimentos de forma segura:
@@ -348,36 +412,29 @@ def sugerir_pontes_alimentares_ia(paciente_id: int):
 
     Baseado no conceito de "Food Chaining" (Pontes Alimentares), sugira 3 novos alimentos para introduzir na dieta.
     A regra principal é: O novo alimento DEVE ter a mesma TEXTURA e SABOR de um dos alimentos seguros. 
-    
     Devolve EXATAMENTE no formato JSON abaixo, sem texto extra antes ou depois, e sem formatação markdown:
     [
-      {{
-        "baseado_em": "Nome do alimento seguro",
-        "sugestao_alimento": "Novo alimento",
-        "afinidade_score": "Porcentagem (ex: 90%)",
-        "propriedades": "Textura | Sabor | Cor",
-        "justificativa_clinica": "Por que esta ponte funciona a nível sensorial e motor"
-      }}
+    {{
+    "baseado_em": "Nome do alimento seguro",
+    "sugestao_alimento": "Novo alimento",
+    "afinidade_score": "Porcentagem (ex: 90%)",
+    "propriedades": "Textura | Sabor | Cor",
+    "justificativa_clinica": "Por que esta ponte funciona a nível sensorial e motor"
+    }}
     ]
     """
 
-    # 3. Chamar o Google Gemini
     try:
         genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-        # Com a biblioteca atualizada, o 1.5-flash vai funcionar perfeitamente!
         model = genai.GenerativeModel('gemini-1.5-flash')
-        
         response = model.generate_content(prompt)
-        
         texto_resposta = response.text.replace("```json", "").replace("```", "").strip()
         sugestoes_geradas = json.loads(texto_resposta)
-        
         return {
             "paciente_id": paciente_id, 
             "total_sugestoes": len(sugestoes_geradas), 
             "sugestoes": sugestoes_geradas
         }
-        
     except Exception as e:
         return {
             "paciente_id": paciente_id,
@@ -386,15 +443,14 @@ def sugerir_pontes_alimentares_ia(paciente_id: int):
             "mensagem": f"Ocorreu um erro ao comunicar com a IA: {str(e)}"
         }
 
-
 # --- SOLICITAÇÃO DE INSUMOS & ALERTAS ---
 @app.post("/insumos/solicitar/")
 def solicitar_insumo_sessao(dados: SolicitacaoInsumoSchema):
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO solicitacoes_insumos (paciente_id, data_consulta, alimentos_solicitados, orientacoes_preparo, lembrete_config)
-        VALUES (?, ?, ?, ?, ?)
+    INSERT INTO solicitacoes_insumos (paciente_id, data_consulta, alimentos_solicitados, orientacoes_preparo, lembrete_config)
+    VALUES (?, ?, ?, ?, ?)
     """, (dados.paciente_id, dados.data_consulta, dados.alimentos_solicitados, dados.orientacoes_preparo, dados.lembrete_config))
     conn.commit()
     conn.close()
@@ -405,10 +461,10 @@ def obter_insumos_paciente(paciente_id: int):
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT id, data_consulta, alimentos_solicitados, orientacoes_preparo, status, lembrete_config
-        FROM solicitacoes_insumos
-        WHERE paciente_id = ?
-        ORDER BY id DESC
+    SELECT id, data_consulta, alimentos_solicitados, orientacoes_preparo, status, lembrete_config
+    FROM solicitacoes_insumos
+    WHERE paciente_id = ?
+    ORDER BY id DESC
     """, (paciente_id,))
     registros = cursor.fetchall()
     conn.close()
@@ -434,14 +490,13 @@ def confirmar_preparo_pais(solicitacao_id: int):
 
 @app.get("/insumos/alertas-pendentes/")
 def verificar_alertas_profissionais():
-    """Busca pacientes sem solicitação de alimentos cadastrada."""
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT p.id, p.nome, MAX(s.data_consulta)
-        FROM pacientes p
-        LEFT JOIN solicitacoes_insumos s ON p.id = s.paciente_id
-        GROUP BY p.id
+    SELECT p.id, p.nome, MAX(s.data_consulta)
+    FROM pacientes p
+    LEFT JOIN solicitacoes_insumos s ON p.id = s.paciente_id
+    GROUP BY p.id
     """)
     pacientes = cursor.fetchall()
     conn.close()
@@ -457,7 +512,6 @@ def verificar_alertas_profissionais():
                 "nome": nome,
                 "mensagem": f"Atenção: O paciente {nome} (ID {paciente_id}) não possui alimentos solicitados para a próxima sessão!"
             })
-
     return {"total_alertas": len(alertas), "alertas": alertas}
 
 # --- COMUNICAÇÃO ---
@@ -467,12 +521,12 @@ def prescrever_tarefa(tarefa: TarefaProfissional):
     cursor = conn.cursor()
     data_atual = datetime.now().strftime("%Y-%m-%d %H:%M")
     cursor.execute("""
-        INSERT INTO atividades_comunicacao (paciente_id, data_registro, remetente, mensagem_tarefa, nivel_reacao, caminho_foto)
-        VALUES (?, ?, 'profissional', ?, 'Orientação Clínica', NULL)
+    INSERT INTO atividades_comunicacao (paciente_id, data_registro, remetente, mensagem_tarefa, nivel_reacao, caminho_foto)
+    VALUES (?, ?, 'profissional', ?, 'Orientação Clínica', NULL)
     """, (tarefa.paciente_id, data_atual, tarefa.orientacao_tarefa))
     conn.commit()
     conn.close()
-    return {"mensagem": "Tarefa prescrevida!"}
+    return {"mensagem": "Tarefa prescrita!"}
 
 @app.post("/comunicacao/registrar-oferta-familia/")
 async def registrar_oferta_familia(
@@ -493,8 +547,8 @@ async def registrar_oferta_familia(
 
     data_atual = datetime.now().strftime("%Y-%m-%d %H:%M")
     cursor.execute("""
-        INSERT INTO atividades_comunicacao (paciente_id, data_registro, remetente, mensagem_tarefa, nivel_reacao, caminho_foto)
-        VALUES (?, ?, 'familia', ?, ?, ?)
+    INSERT INTO atividades_comunicacao (paciente_id, data_registro, remetente, mensagem_tarefa, nivel_reacao, caminho_foto)
+    VALUES (?, ?, 'familia', ?, ?, ?)
     """, (paciente_id, data_atual, comentario_pais, nivel_reacao, caminho_foto_relativo))
     conn.commit()
     conn.close()
@@ -522,7 +576,6 @@ def gerar_relatorio_pdf(paciente_id: int):
         raise HTTPException(status_code=404, detail="Paciente não encontrado.")
 
     nome, idade, peso, altura, tmb, tdee, agua = reg[0], reg[1], reg[2], reg[3], reg[4], reg[5], reg[6]
-    
     oms = avaliar_curva_crescimento_oms(peso, altura, idade)
     macros = calcular_macronutrientes(tdee)
 
@@ -588,5 +641,3 @@ def gerar_relatorio_pdf(paciente_id: int):
     doc.build(story)
     buffer.seek(0)
     return StreamingResponse(buffer, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=Relatorio_{nome}.pdf"})
-
- 
