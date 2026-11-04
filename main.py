@@ -127,20 +127,28 @@ def inicializar_banco():
     )
     """)
     
-    # Tabela de Repertório Alimentar
+    # Tabela de Recordatório 24h (Atualizada)
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS repertorio_alimentar (
+    CREATE TABLE IF NOT EXISTS recordatorio (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         paciente_id INTEGER NOT NULL,
+        refeicao TEXT NOT NULL,
         alimento TEXT NOT NULL,
-        status TEXT NOT NULL,
-        textura TEXT NOT NULL,
-        sabor TEXT NOT NULL,
-        cor TEXT NOT NULL,
-        temperatura TEXT NOT NULL,
+        quantidade TEXT NOT NULL,
+        data_registro TEXT NOT NULL,
+        horario TEXT,
+        aceitacao TEXT,
+        contexto TEXT,
         FOREIGN KEY (paciente_id) REFERENCES pacientes (id)
     )
     """)
+    # Adiciona as novas colunas caso a tabela antiga já exista (evita perder pacientes)
+    try:
+        cursor.execute("ALTER TABLE recordatorio ADD COLUMN horario TEXT DEFAULT '00:00'")
+        cursor.execute("ALTER TABLE recordatorio ADD COLUMN aceitacao TEXT DEFAULT 'Não informado'")
+        cursor.execute("ALTER TABLE recordatorio ADD COLUMN contexto TEXT DEFAULT 'Não informado'")
+    except sqlite3.OperationalError:
+        pass # As colunas já existem
 
     # Tabela de Solicitação de Insumos / Alimentos para Sessão
     cursor.execute("""
@@ -222,6 +230,9 @@ class RecordatorioItem(BaseModel):
     refeicao: str
     alimento: str
     quantidade: str
+    horario: str
+    aceitacao: str
+    contexto: str
 
 class AlimentoRepertorioSchema(BaseModel):
     paciente_id: int
@@ -381,9 +392,9 @@ def adicionar_item_recordatorio(item: RecordatorioItem):
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
     cursor.execute("""
-    INSERT INTO recordatorio (paciente_id, refeicao, alimento, quantidade, data_registro)
-    VALUES (?, ?, ?, ?, ?)
-    """, (item.paciente_id, item.refeicao, item.alimento, item.quantidade, data_atual))
+    INSERT INTO recordatorio (paciente_id, refeicao, alimento, quantidade, data_registro, horario, aceitacao, contexto)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (item.paciente_id, item.refeicao, item.alimento, item.quantidade, data_atual, item.horario, item.aceitacao, item.contexto))
     conn.commit()
     conn.close()
     return {"mensagem": "Item adicionado ao Recordatório 24h!"}
@@ -392,10 +403,17 @@ def adicionar_item_recordatorio(item: RecordatorioItem):
 def obter_recordatorio(paciente_id: int):
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT id, refeicao, alimento, quantidade, data_registro FROM recordatorio WHERE paciente_id = ? ORDER BY id DESC", (paciente_id,))
+    cursor.execute("""
+    SELECT id, refeicao, alimento, quantidade, data_registro, horario, aceitacao, contexto 
+    FROM recordatorio WHERE paciente_id = ? 
+    ORDER BY data_registro DESC, horario DESC
+    """, (paciente_id,))
     registros = cursor.fetchall()
     conn.close()
-    return [{"id": r[0], "refeicao": r[1], "alimento": r[2], "quantidade": r[3], "data": r[4]} for r in registros]
+    return [{
+        "id": r[0], "refeicao": r[1], "alimento": r[2], "quantidade": r[3], 
+        "data": r[4], "horario": r[5], "aceitacao": r[6], "contexto": r[7]
+    } for r in registros]
 
 # --- REPERTÓRIO ALIMENTAR & MOTOR DE IA SENSORIAL ---
 @app.post("/repertorio/")

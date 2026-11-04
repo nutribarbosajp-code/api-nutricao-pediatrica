@@ -298,42 +298,66 @@ elif menu == "Ficha de Anamnese":
 
 # --- ABA 3: RECORDATÓRIO 24H ---
 elif menu == "Recordatório 24h":
-    st.header("🥗 Recordatório Alimentar de 24 Horas")
+    st.header("🥗 Recordatório Alimentar & Comportamental de 24 Horas")
+    st.markdown("Registe o diário alimentar detalhado para mapear padrões de fome, saciedade e comportamento durante as refeições.")
     
     paciente_id = st.number_input("ID do Paciente", min_value=1, step=1, value=1, key="rec_id")
     
-    tab_reg_rec, tab_ver_rec = st.tabs(["📝 Registar Consumo", "📊 Consultar Diário Consumido"])
+    tab_reg_rec, tab_ver_rec = st.tabs(["📝 Registar Consumo", "📊 Consultar Diário"])
     
     with tab_reg_rec:
-        st.subheader("Registar Alimento Ingerido nas últimas 24h")
+        st.subheader("Adicionar Refeição ao Diário")
         with st.form("form_recordatorio"):
-            refeicao = st.selectbox("Refeição", ["Pequeno-almoço", "Lanche da Manhã", "Almoço", "Lanche da Tarde", "Jantar", "Ceia"])
-            alimento = st.text_input("Alimento / Preparação", placeholder="Ex: Arroz, feijão amassado e frango desfiado")
-            quantidade = st.text_input("Quantidade Estimada", placeholder="Ex: 3 colheres de sopa")
+            c1, c2 = st.columns(2)
+            with c1:
+                refeicao = st.selectbox("Qual a refeição?", ["Pequeno-almoço", "Lanche da Manhã", "Almoço", "Lanche da Tarde", "Jantar", "Ceia", "Beliscar / Fora de hora"])
+                horario = st.time_input("Horário da Refeição")
+            with c2:
+                aceitacao = st.selectbox("Nível de Aceitação", ["Comeu tudo", "Comeu mais de metade", "Comeu menos de metade", "Apenas provou", "Recusou totalmente", "Cuspiu/Vomitou"])
+                contexto = st.selectbox("Contexto / Ambiente", ["À mesa com a família", "À mesa sozinho", "Assistindo TV / Telas", "Brincando / Em movimento", "Na escola / Creche"])
+                
+            alimento = st.text_area("Alimentos Consumidos e Preparação", placeholder="Ex: Arroz branco, feijão com caldo, nuggets de frango (marca X)")
+            quantidade = st.text_input("Quantidade Estimada", placeholder="Ex: 3 colheres de sopa de arroz, 2 nuggets")
             
-            if st.form_submit_button("Adicionar ao Recordatório"):
+            if st.form_submit_button("Guardar no Recordatório"):
                 payload = {
-                    "paciente_id": paciente_id, 
+                    "paciente_id": paciente_id,
                     "refeicao": refeicao, 
                     "alimento": alimento, 
-                    "quantidade": quantidade
+                    "quantidade": quantidade,
+                    "horario": horario.strftime("%H:%M"),
+                    "aceitacao": aceitacao,
+                    "contexto": contexto
                 }
                 try:
                     res = requests.post(f"{API_URL}/recordatorio/", json=payload)
                     if res.status_code == 200:
-                        st.success("Item adicionado ao Recordatório com sucesso!")
+                        st.success("Refeição registada com sucesso no diário do paciente!")
                 except Exception as e:
                     st.error(f"Erro de conexão: {e}")
                     
     with tab_ver_rec:
-        st.subheader("Histórico do Recordatório 24h")
-        if st.button("Atualizar e Visualizar Registos"):
+        st.subheader("Histórico do Diário Alimentar")
+        if st.button("Atualizar Visualização do Diário"):
             try:
                 res = requests.get(f"{API_URL}/recordatorio/{paciente_id}")
                 if res.status_code == 200:
                     registros = res.json()
                     if registros:
-                        st.dataframe(registros, use_container_width=True)
+                        # Exibição visual em blocos tipo "Feed" em vez de tabela crua
+                        for reg in registros:
+                            with st.container():
+                                st.markdown(f"### 📅 {reg['data']} às ⏰ {reg['horario']} — **{reg['refeicao']}**")
+                                colA, colB = st.columns(2)
+                                with colA:
+                                    st.write(f"🍽️ **Alimento / Preparação:** {reg['alimento']}")
+                                    st.write(f"⚖️ **Quantidade:** {reg['quantidade']}")
+                                with colB:
+                                    # Formatação de cor para a aceitação
+                                    cor_aceitacao = "🔴" if "Recusou" in reg['aceitacao'] or "Cuspiu" in reg['aceitacao'] else "🟢"
+                                    st.write(f"{cor_aceitacao} **Aceitação:** {reg['aceitacao']}")
+                                    st.write(f"🏠 **Contexto:** {reg['contexto']}")
+                                st.divider()
                     else:
                         st.info("Nenhum registo de recordatório encontrado para este paciente.")
             except Exception as e:
