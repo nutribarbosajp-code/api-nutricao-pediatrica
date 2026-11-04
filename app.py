@@ -1,5 +1,7 @@
 import streamlit as st
+import streamlit as st
 import requests
+import pandas as pd  # <--- ADICIONE ESTA LINHA
 
 st.set_page_config(page_title="Plataforma de Nutrição Pediátrica & IA", page_icon="👶", layout="wide")
 
@@ -15,6 +17,7 @@ menu = st.sidebar.radio(
     "Navegação",
     [
         "Perfil & Busca de Pacientes",
+        "Dashboard Clínico 📊",  # <--- NOVO ITEM AQUI
         "Cadastrar Paciente", 
         "Ficha de Anamnese", 
         "Recordatório 24h", 
@@ -85,6 +88,57 @@ if menu == "Perfil & Busca de Pacientes":
                         st.write(f"{cor_status} **{item['alimento']}** — Textura: {item['textura']} | Sabor: {item['sabor']} | Cor: {item['cor']}")
                 else:
                     st.info("Nenhum alimento registado no repertório deste paciente.")
+# --- ABA: DASHBOARD CLÍNICO ---
+elif menu == "Dashboard Clínico 📊":
+    st.header("📊 Dashboard Clínico & Evolução Sensorial")
+    st.markdown("Acompanhe o progresso da expansão alimentar e as taxas de aceitação diária através de gráficos visuais.")
+    
+    paciente_id = st.number_input("ID do Paciente", min_value=1, step=1, value=1, key="dash_id")
+    
+    if st.button("Carregar Gráficos do Paciente"):
+        try:
+            res = requests.get(f"{API_URL}/estatisticas/{paciente_id}")
+            if res.status_code == 200:
+                dados = res.json()
+                
+                # 1. KPIs Principais
+                st.subheader("🎯 Panorama do Repertório Mapeado")
+                status = dados.get("status_repertorio", {})
+                c1, c2, c3 = st.columns(3)
+                c1.metric("🟢 Alimentos Seguros", status.get("seguro", 0))
+                c2.metric("🟡 Em Trabalho Terapêutico", status.get("em_trabalho", 0))
+                c3.metric("🔴 Alimentos Recusados", status.get("recusado", 0))
+                
+                st.divider()
+                col_graf1, col_graf2 = st.columns(2)
+                
+                # 2. Gráfico de Barras: Texturas
+                with col_graf1:
+                    st.markdown("### Perfil de Texturas (Aceites)")
+                    texturas = dados.get("texturas_seguras", {})
+                    if texturas:
+                        # Converte os dados recebidos numa tabela para o Streamlit desenhar
+                        df_tex = pd.DataFrame(list(texturas.items()), columns=["Textura", "Quantidade"])
+                        st.bar_chart(df_tex.set_index("Textura"), color="#10B981")
+                    else:
+                        st.info("Registe 'alimentos seguros' no Repertório para ver o perfil de texturas dominantes da criança.")
+                        
+                # 3. Gráfico de Linhas: Evolução do Comportamento
+                with col_graf2:
+                    st.markdown("### Curva de Comportamento nas Refeições")
+                    evolucao = dados.get("evolucao_recordatorio", [])
+                    if evolucao:
+                        df_evo = pd.DataFrame(evolucao)
+                        # Cruza as datas com os níveis de aceitação para desenhar as curvas
+                        df_pivot = df_evo.pivot(index='data', columns='aceitacao', values='quantidade').fillna(0)
+                        st.line_chart(df_pivot)
+                    else:
+                        st.info("Preencha o 'Recordatório 24h' para gerar a curva de evolução ao longo do tempo.")
+            else:
+                st.warning("Não foi possível carregar os dados. Verifique se o ID existe.")
+        except Exception as e:
+            st.error(f"Erro de conexão com o servidor: {e}")
+
 
 # --- ABA 1: CADASTRAR PACIENTE ---
 elif menu == "Cadastrar Paciente":

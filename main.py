@@ -617,6 +617,44 @@ def obter_historico_comunicacao(paciente_id: int):
 
 import html
 
+# --- DASHBOARD ESTATÍSTICO ---
+@app.get("/estatisticas/{paciente_id}")
+def obter_estatisticas(paciente_id: int):
+    conn = sqlite3.connect("pacientes.db")
+    cursor = conn.cursor()
+    
+    # 1. Contagem do status no Repertório Alimentar
+    cursor.execute("SELECT status, COUNT(*) FROM repertorio_alimentar WHERE paciente_id = ? GROUP BY status", (paciente_id,))
+    rep_raw = cursor.fetchall()
+    
+    status_contagem = {"seguro": 0, "em_trabalho": 0, "recusado": 0}
+    for row in rep_raw:
+        status_nome = row[0].lower()
+        qtd = row[1]
+        if "seguro" in status_nome: 
+            status_contagem["seguro"] += qtd
+        elif "em_trabalho" in status_nome: 
+            status_contagem["em_trabalho"] += qtd
+        elif "recusado" in status_nome: 
+            status_contagem["recusado"] += qtd
+
+    # 2. Perfil de Texturas dos Alimentos Seguros
+    cursor.execute("SELECT textura, COUNT(*) FROM repertorio_alimentar WHERE paciente_id = ? AND status = 'seguro' GROUP BY textura", (paciente_id,))
+    rep_textura = dict(cursor.fetchall())
+    
+    # 3. Evolução de Aceitação no Recordatório Diário
+    cursor.execute("SELECT data_registro, aceitacao, COUNT(*) FROM recordatorio WHERE paciente_id = ? GROUP BY data_registro, aceitacao ORDER BY data_registro", (paciente_id,))
+    rec_stats = cursor.fetchall()
+    
+    conn.close()
+    
+    return {
+        "status_repertorio": status_contagem,
+        "texturas_seguras": rep_textura,
+        "evolucao_recordatorio": [{"data": r[0], "aceitacao": r[1], "quantidade": r[2]} for r in rec_stats]
+    }
+
+
 # --- LAUDO EM PDF COMPLETO (SANITIZADO E BULLETPROOF) ---
 @app.get("/pacientes/{paciente_id}/relatorio-pdf")
 def gerar_relatorio_pdf(paciente_id: int):
