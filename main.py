@@ -597,130 +597,140 @@ def obter_historico_comunicacao(paciente_id: int):
     conn.close()
     return {"feed": [{"id": r[0], "data": r[1], "enviado_por": r[2], "mensagem": r[3], "nivel_reacao": r[4], "foto_url": r[5]} for r in registros]}
 
-# --- LAUDO EM PDF COMPLETO COM TRATAMENTO DE ERROS E SEGURANÇA ---
+import html
+
+# --- LAUDO EM PDF COMPLETO (SANITIZADO E BULLETPROOF) ---
 @app.get("/pacientes/{paciente_id}/relatorio-pdf")
 def gerar_relatorio_pdf(paciente_id: int):
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
     
-    # Buscar dados do paciente
+    # 1. Buscar dados do paciente
     cursor.execute("SELECT nome, idade_anos, peso_kg, altura_cm, tmb_kcal, tdee_kcal, agua_ml FROM pacientes WHERE id = ?", (paciente_id,))
     reg_paciente = cursor.fetchone()
     
     if not reg_paciente:
         conn.close()
-        raise HTTPException(status_code=404, detail="Paciente não encontrado.")
+        raise HTTPException(status_code=404, detail=f"Paciente com ID {paciente_id} não encontrado na base de dados.")
 
     nome, idade, peso, altura, tmb, tdee, agua = reg_paciente[0], reg_paciente[1], reg_paciente[2], reg_paciente[3], reg_paciente[4], reg_paciente[5], reg_paciente[6]
 
-    # Buscar anamnese de forma segura (caso não exista, não falha)
+    # 2. Buscar anamnese de forma segura
     cursor.execute("""
     SELECT doencas_existentes, comportamentos_alimentares, preferencias_aversoes, opiniao_pais
     FROM anamnese WHERE paciente_id = ?
     """, (paciente_id,))
     reg_anamnese = cursor.fetchone()
     
-    # Buscar repertório alimentar
+    # 3. Buscar repertório alimentar
     cursor.execute("SELECT alimento, status, textura, sabor FROM repertorio_alimentar WHERE paciente_id = ?", (paciente_id,))
     reg_repertorio = cursor.fetchall()
     
     conn.close()
 
-    oms = avaliar_curva_crescimento_oms(peso, altura, idade)
-    macros = calcular_macronutrientes(tdee)
+    try:
+        oms = avaliar_curva_crescimento_oms(peso, altura, idade)
+        macros = calcular_macronutrientes(tdee)
 
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=35, bottomMargin=35)
-    story = []
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=35, bottomMargin=35)
+        story = []
 
-    styles = getSampleStyleSheet()
-    titulo_style = ParagraphStyle('Titulo', parent=styles['Heading1'], fontSize=15, textColor=colors.HexColor('#1E3A8A'), spaceAfter=8)
-    subtitulo_style = ParagraphStyle('Subtitulo', parent=styles['Heading2'], fontSize=11, textColor=colors.HexColor('#2563EB'), spaceBefore=8, spaceAfter=4)
-    texto_style = ParagraphStyle('Texto', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#1F2937'), spaceBefore=3)
+        styles = getSampleStyleSheet()
+        titulo_style = ParagraphStyle('Titulo', parent=styles['Heading1'], fontSize=15, textColor=colors.HexColor('#1E3A8A'), spaceAfter=8)
+        subtitulo_style = ParagraphStyle('Subtitulo', parent=styles['Heading2'], fontSize=11, textColor=colors.HexColor('#2563EB'), spaceBefore=8, spaceAfter=4)
+        texto_style = ParagraphStyle('Texto', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#1F2937'), spaceBefore=3)
 
-    # Cabeçalho
-    story.append(Paragraph("RELATÓRIO DE NUTRIÇÃO PEDIÁTRICA & TERAPIA SENSORIAL", titulo_style))
-    story.append(Spacer(1, 4))
+        # Cabeçalho
+        story.append(Paragraph("RELATÓRIO DE NUTRIÇÃO PEDIÁTRICA & TERAPIA SENSORIAL", titulo_style))
+        story.append(Spacer(1, 4))
 
-    dados = [
-        ["Paciente:", nome, "Idade:", f"{idade} anos"],
-        ["Peso:", f"{peso} kg", "Altura:", f"{altura} cm"],
-        ["TMB:", f"{tmb} kcal/dia", "GET Total:", f"{tdee} kcal/dia"],
-        ["Meta Hídrica:", f"{agua} ml/dia", "Classificação OMS:", oms['classificacao_oms']]
-    ]
-    tabela = Table(dados, colWidths=[110, 155, 120, 155])
-    tabela.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F3F4F6')),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#D1D5DB')),
-        ('PADDING', (0,0), (-1,-1), 4),
-    ]))
-    story.append(tabela)
-    story.append(Spacer(1, 6))
-
-    # Avaliação Antropométrica
-    story.append(Paragraph("Avaliação Antropométrica & Curvas da OMS", subtitulo_style))
-    oms_dados = [
-        ["Indicador OMS", "Resultado Obtido", "Interpretação Clínica"],
-        ["IMC Calculado", f"{oms['imc']} kg/m²", "Relação Peso x Estatura"],
-        ["Escore Z (Z-Score)", oms['z_score'], "Desvio Padrão populacional"],
-        ["Percentil Estimado", oms['percentil_estimado'], "Posição na curva de referência"]
-    ]
-    tabela_oms = Table(oms_dados, colWidths=[130, 140, 270])
-    tabela_oms.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2563EB')),
-        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#93C5FD')),
-        ('PADDING', (0,0), (-1,-1), 4),
-    ]))
-    story.append(tabela_oms)
-    story.append(Paragraph(f"<b>Parecer Clínico OMS:</b> {oms['orientacao_clinica']}", texto_style))
-    story.append(Spacer(1, 6))
-
-    # Macronutrientes
-    story.append(Paragraph("Distribuição Estimada de Macronutrientes", subtitulo_style))
-    macro_dados = [
-        ["Proteínas (15%)", "Lipídios / Gorduras (30%)", "Carboidratos (55%)"],
-        [f"{macros['proteinas_g']} g/dia", f"{macros['lipidios_g']} g/dia", f"{macros['carboidratos_g']} g/dia"]
-    ]
-    tabela_macro = Table(macro_dados, colWidths=[170, 180, 180])
-    tabela_macro.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#059669')),
-        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#A7F3D0')),
-        ('PADDING', (0,0), (-1,-1), 4),
-    ]))
-    story.append(tabela_macro)
-    story.append(Spacer(1, 6))
-
-    # Anamnese Resumida (apenas se preenchida)
-    if reg_anamnese and any(reg_anamnese):
-        doencas, comportamentos, preferencias, opiniao = reg_anamnese[0], reg_anamnese[1], reg_anamnese[2], reg_anamnese[3]
-        story.append(Paragraph("Resumo Clínico & Comportamental (Anamnese)", subtitulo_style))
-        anamnese_texto = f"""
-        <b>Condições / Doenças:</b> {doencas or 'Não informado'}<br/>
-        <b>Comportamentos Alimentares:</b> {comportamentos or 'Não informado'}<br/>
-        <b>Preferências / Aversões:</b> {preferencias or 'Não informado'}<br/>
-        <b>Expectativa dos Pais:</b> {opiniao or 'Não informado'}
-        """
-        story.append(Paragraph(anamnese_texto, texto_style))
+        dados = [
+            ["Paciente:", html.escape(str(nome)), "Idade:", f"{idade} anos"],
+            ["Peso:", f"{peso} kg", "Altura:", f"{altura} cm"],
+            ["TMB:", f"{tmb} kcal/dia", "GET Total:", f"{tdee} kcal/dia"],
+            ["Meta Hídrica:", f"{agua} ml/dia", "Classificação OMS:", oms['classificacao_oms']]
+        ]
+        tabela = Table(dados, colWidths=[110, 155, 120, 155])
+        tabela.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F3F4F6')),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#D1D5DB')),
+            ('PADDING', (0,0), (-1,-1), 4),
+        ]))
+        story.append(tabela)
         story.append(Spacer(1, 6))
 
-    # Repertório Alimentar
-    if reg_repertorio:
-        story.append(Paragraph("Repertório Sensorial Mapeado", subtitulo_style))
-        rep_dados = [["Alimento", "Status", "Textura", "Sabor"]]
-        for item in reg_repertorio:
-            rep_dados.append([item[0], item[1], item[2], item[3]])
-        
-        tabela_rep = Table(rep_dados, colWidths=[140, 120, 130, 150])
-        tabela_rep.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#D97706')),
+        # Avaliação Antropométrica OMS
+        story.append(Paragraph("Avaliação Antropométrica & Curvas da OMS", subtitulo_style))
+        oms_dados = [
+            ["Indicador OMS", "Resultado Obtido", "Interpretação Clínica"],
+            ["IMC Calculado", f"{oms['imc']} kg/m²", "Relação Peso x Estatura"],
+            ["Escore Z (Z-Score)", oms['z_score'], "Desvio Padrão populacional"],
+            ["Percentil Estimado", oms['percentil_estimado'], "Posição na curva de referência"]
+        ]
+        tabela_oms = Table(oms_dados, colWidths=[130, 140, 270])
+        tabela_oms.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2563EB')),
             ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#FCD34D')),
-            ('PADDING', (0,0), (-1,-1), 3),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#93C5FD')),
+            ('PADDING', (0,0), (-1,-1), 4),
         ]))
-        story.append(tabela_rep)
+        story.append(tabela_oms)
+        story.append(Paragraph(f"<b>Parecer Clínico OMS:</b> {html.escape(oms['orientacao_clinica'])}", texto_style))
+        story.append(Spacer(1, 6))
 
-    doc.build(story)
-    buffer.seek(0)
-    return StreamingResponse(buffer, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=Relatorio_{nome}.pdf"})
+        # Macronutrientes
+        story.append(Paragraph("Distribuição Estimada de Macronutrientes", subtitulo_style))
+        macro_dados = [
+            ["Proteínas (15%)", "Lipídios / Gorduras (30%)", "Carboidratos (55%)"],
+            [f"{macros['proteinas_g']} g/dia", f"{macros['lipidios_g']} g/dia", f"{macros['carboidratos_g']} g/dia"]
+        ]
+        tabela_macro = Table(macro_dados, colWidths=[170, 180, 180])
+        tabela_macro.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#059669')),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#A7F3D0')),
+            ('PADDING', (0,0), (-1,-1), 4),
+        ]))
+        story.append(tabela_macro)
+        story.append(Spacer(1, 6))
+
+        # Anamnese Resumida
+        if reg_anamnese and any(reg_anamnese):
+            doencas = html.escape(reg_anamnese[0] or 'Não informado')
+            comportamentos = html.escape(reg_anamnese[1] or 'Não informado')
+            preferencias = html.escape(reg_anamnese[2] or 'Não informado')
+            opiniao = html.escape(reg_anamnese[3] or 'Não informado')
+            
+            story.append(Paragraph("Resumo Clínico & Comportamental (Anamnese)", subtitulo_style))
+            anamnese_texto = f"""
+            <b>Condições / Doenças:</b> {doencas}<br/>
+            <b>Comportamentos Alimentares:</b> {comportamentos}<br/>
+            <b>Preferências / Aversões:</b> {preferencias}<br/>
+            <b>Expectativa dos Pais:</b> {opiniao}
+            """
+            story.append(Paragraph(anamnese_texto, texto_style))
+            story.append(Spacer(1, 6))
+
+        # Repertório Alimentar
+        if reg_repertorio:
+            story.append(Paragraph("Repertório Sensorial Mapeado", subtitulo_style))
+            rep_dados = [["Alimento", "Status", "Textura", "Sabor"]]
+            for item in reg_repertorio:
+                rep_dados.append([html.escape(str(item[0])), html.escape(str(item[1])), html.escape(str(item[2])), html.escape(str(item[3]))])
+            
+            tabela_rep = Table(rep_dados, colWidths=[140, 120, 130, 150])
+            tabela_rep.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#D97706')),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#FCD34D')),
+                ('PADDING', (0,0), (-1,-1), 3),
+            ]))
+            story.append(tabela_rep)
+
+        doc.build(story)
+        buffer.seek(0)
+        return StreamingResponse(buffer, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=Relatorio_{nome}.pdf"})
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro interno na construção do PDF: {str(e)}")
