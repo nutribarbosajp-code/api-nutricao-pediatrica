@@ -597,7 +597,7 @@ def obter_historico_comunicacao(paciente_id: int):
     conn.close()
     return {"feed": [{"id": r[0], "data": r[1], "enviado_por": r[2], "mensagem": r[3], "nivel_reacao": r[4], "foto_url": r[5]} for r in registros]}
 
-# --- LAUDO EM PDF COMPLETO COM TMB, GRÁFICO OMS, ANAMNESE E REPERTÓRIO ---
+# --- LAUDO EM PDF COMPLETO COM TRATAMENTO DE ERROS E SEGURANÇA ---
 @app.get("/pacientes/{paciente_id}/relatorio-pdf")
 def gerar_relatorio_pdf(paciente_id: int):
     conn = sqlite3.connect("pacientes.db")
@@ -607,7 +607,13 @@ def gerar_relatorio_pdf(paciente_id: int):
     cursor.execute("SELECT nome, idade_anos, peso_kg, altura_cm, tmb_kcal, tdee_kcal, agua_ml FROM pacientes WHERE id = ?", (paciente_id,))
     reg_paciente = cursor.fetchone()
     
-    # Buscar anamnese
+    if not reg_paciente:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Paciente não encontrado.")
+
+    nome, idade, peso, altura, tmb, tdee, agua = reg_paciente[0], reg_paciente[1], reg_paciente[2], reg_paciente[3], reg_paciente[4], reg_paciente[5], reg_paciente[6]
+
+    # Buscar anamnese de forma segura (caso não exista, não falha)
     cursor.execute("""
     SELECT doencas_existentes, comportamentos_alimentares, preferencias_aversoes, opiniao_pais
     FROM anamnese WHERE paciente_id = ?
@@ -620,10 +626,6 @@ def gerar_relatorio_pdf(paciente_id: int):
     
     conn.close()
 
-    if not reg_paciente:
-        raise HTTPException(status_code=404, detail="Paciente não encontrado.")
-
-    nome, idade, peso, altura, tmb, tdee, agua = reg_paciente[0], reg_paciente[1], reg_paciente[2], reg_paciente[3], reg_paciente[4], reg_paciente[5], reg_paciente[6]
     oms = avaliar_curva_crescimento_oms(peso, altura, idade)
     macros = calcular_macronutrientes(tdee)
 
@@ -643,10 +645,10 @@ def gerar_relatorio_pdf(paciente_id: int):
     dados = [
         ["Paciente:", nome, "Idade:", f"{idade} anos"],
         ["Peso:", f"{peso} kg", "Altura:", f"{altura} cm"],
-        ["Taxa Metabólica Basal (TMB):", f"{tmb} kcal/dia", "Gasto Energético Total (GET):", f"{tdee} kcal/dia"],
+        ["TMB:", f"{tmb} kcal/dia", "GET Total:", f"{tdee} kcal/dia"],
         ["Meta Hídrica:", f"{agua} ml/dia", "Classificação OMS:", oms['classificacao_oms']]
     ]
-    tabela = Table(dados, colWidths=[120, 145, 130, 145])
+    tabela = Table(dados, colWidths=[110, 155, 120, 155])
     tabela.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F3F4F6')),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#D1D5DB')),
@@ -655,7 +657,7 @@ def gerar_relatorio_pdf(paciente_id: int):
     story.append(tabela)
     story.append(Spacer(1, 6))
 
-    # Avaliação Antropométrica Detalhada & Z-Score Visual
+    # Avaliação Antropométrica
     story.append(Paragraph("Avaliação Antropométrica & Curvas da OMS", subtitulo_style))
     oms_dados = [
         ["Indicador OMS", "Resultado Obtido", "Interpretação Clínica"],
@@ -690,8 +692,8 @@ def gerar_relatorio_pdf(paciente_id: int):
     story.append(tabela_macro)
     story.append(Spacer(1, 6))
 
-    # Anamnese Resumida
-    if reg_anamnese:
+    # Anamnese Resumida (apenas se preenchida)
+    if reg_anamnese and any(reg_anamnese):
         doencas, comportamentos, preferencias, opiniao = reg_anamnese[0], reg_anamnese[1], reg_anamnese[2], reg_anamnese[3]
         story.append(Paragraph("Resumo Clínico & Comportamental (Anamnese)", subtitulo_style))
         anamnese_texto = f"""
