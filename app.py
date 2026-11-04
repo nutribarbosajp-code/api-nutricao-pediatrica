@@ -310,7 +310,7 @@ elif menu == "Recordatório 24h":
         with st.form("form_recordatorio"):
             c1, c2 = st.columns(2)
             with c1:
-                refeicao = st.selectbox("Qual a refeição?", ["Pequeno-almoço", "Lanche da Manhã", "Almoço", "Lanche da Tarde", "Jantar", "Ceia", "Beliscar / Fora de hora"])
+                refeicao = st.selectbox("Qual a refeição?", ["Café da manhã", "Lanche da Manhã", "Almoço", "Lanche da Tarde", "Jantar", "Ceia", "Beliscar / Fora de hora"])
                 horario = st.time_input("Horário da Refeição")
             with c2:
                 aceitacao = st.selectbox("Nível de Aceitação", ["Comeu tudo", "Comeu mais de metade", "Comeu menos de metade", "Apenas provou", "Recusou totalmente", "Cuspiu/Vomitou"])
