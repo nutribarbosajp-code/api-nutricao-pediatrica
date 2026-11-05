@@ -77,7 +77,12 @@ if not st.session_state["logado"]:
 
 # --- BARRA LATERAL (MENU FILTRADO POR PERFIL) ---
 st.sidebar.title("👶 Painel Principal")
-st.sidebar.write(f"**Perfil:** {'👨‍⚕️ Terapeuta' if st.session_state['tipo_usuario'] == 'terapeuta' else f'👨‍👩‍👧 Família de {st.session_state[\"nome_paciente_familia\"]}'}")
+if st.session_state['tipo_usuario'] == 'terapeuta':
+    perfil_texto = "👨‍⚕️ Terapeuta"
+else:
+    perfil_texto = f"👨‍👩‍👧 Família de {st.session_state['nome_paciente_familia']}"
+
+st.sidebar.write(f"**Perfil:** {perfil_texto}")
 
 if st.sidebar.button("🚪 Sair / Terminar Sessão"):
     st.session_state["logado"] = False
