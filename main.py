@@ -655,30 +655,27 @@ def obter_estatisticas(paciente_id: int):
     }
 
 
-# --- LAUDO EM PDF COMPLETO (SANITIZADO E BULLETPROOF) ---
+import html
+
+# --- LAUDO EM PDF COMPLETO (COM QUEBRA DE TEXTO AUTOMÁTICA) ---
 @app.get("/pacientes/{paciente_id}/relatorio-pdf")
 def gerar_relatorio_pdf(paciente_id: int):
     conn = sqlite3.connect("pacientes.db")
     cursor = conn.cursor()
     
-    # 1. Buscar dados do paciente
+    # Buscar dados
     cursor.execute("SELECT nome, idade_anos, peso_kg, altura_cm, tmb_kcal, tdee_kcal, agua_ml FROM pacientes WHERE id = ?", (paciente_id,))
     reg_paciente = cursor.fetchone()
     
     if not reg_paciente:
         conn.close()
-        raise HTTPException(status_code=404, detail=f"Paciente com ID {paciente_id} não encontrado na base de dados.")
+        raise HTTPException(status_code=404, detail="Paciente não encontrado.")
 
     nome, idade, peso, altura, tmb, tdee, agua = reg_paciente[0], reg_paciente[1], reg_paciente[2], reg_paciente[3], reg_paciente[4], reg_paciente[5], reg_paciente[6]
 
-    # 2. Buscar anamnese de forma segura
-    cursor.execute("""
-    SELECT doencas_existentes, comportamentos_alimentares, preferencias_aversoes, opiniao_pais
-    FROM anamnese WHERE paciente_id = ?
-    """, (paciente_id,))
+    cursor.execute("SELECT doencas_existentes, comportamentos_alimentares, preferencias_aversoes, opiniao_pais FROM anamnese WHERE paciente_id = ?", (paciente_id,))
     reg_anamnese = cursor.fetchone()
     
-    # 3. Buscar repertório alimentar
     cursor.execute("SELECT alimento, status, textura, sabor FROM repertorio_alimentar WHERE paciente_id = ?", (paciente_id,))
     reg_repertorio = cursor.fetchall()
     
@@ -695,98 +692,110 @@ def gerar_relatorio_pdf(paciente_id: int):
         styles = getSampleStyleSheet()
         titulo_style = ParagraphStyle('Titulo', parent=styles['Heading1'], fontSize=15, textColor=colors.HexColor('#1E3A8A'), spaceAfter=8)
         subtitulo_style = ParagraphStyle('Subtitulo', parent=styles['Heading2'], fontSize=11, textColor=colors.HexColor('#2563EB'), spaceBefore=8, spaceAfter=4)
-        texto_style = ParagraphStyle('Texto', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#1F2937'), spaceBefore=3)
+        texto_style = ParagraphStyle('Texto', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#1F2937'), spaceBefore=3, leading=12)
+        # Novo estilo elástico para tabelas:
+        tabela_texto_style = ParagraphStyle('TabelaTexto', parent=styles['Normal'], fontSize=8, textColor=colors.black, leading=10)
+
+        # 🛠️ FUNÇÃO VITAL: Limpa e converte quebras de linha para o PDF não quebrar
+        def limpar(texto):
+            if not texto: return "Não informado"
+            return html.escape(str(texto)).replace('\n', '<br/>')
 
         # Cabeçalho
-        story.append(Paragraph("RELATÓRIO DE NUTRIÇÃO PEDIÁTRICA & TERAPIA SENSORIAL", titulo_style))
+        story.append(Paragraph("RELATÓRIO DE NUTRIÇÃO PEDIÁTRICA E TERAPIA SENSORIAL", titulo_style))
         story.append(Spacer(1, 4))
 
-        dados = [
-            ["Paciente:", html.escape(str(nome)), "Idade:", f"{idade} anos"],
+        dados_paciente_tbl = [
+            ["Paciente:", limpar(nome), "Idade:", f"{idade} anos"],
             ["Peso:", f"{peso} kg", "Altura:", f"{altura} cm"],
             ["TMB:", f"{tmb} kcal/dia", "GET Total:", f"{tdee} kcal/dia"],
-            ["Meta Hídrica:", f"{agua} ml/dia", "Classificação OMS:", oms['classificacao_oms']]
+            ["Meta Hídrica:", f"{agua} ml/dia", "Classificação:", Paragraph(limpar(oms['classificacao_oms']), tabela_texto_style)]
         ]
-        tabela = Table(dados, colWidths=[110, 155, 120, 155])
-        tabela.setStyle(TableStyle([
+        tabela_cabecalho = Table(dados_paciente_tbl, colWidths=[90, 160, 90, 190])
+        tabela_cabecalho.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F3F4F6')),
             ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#D1D5DB')),
-            ('PADDING', (0,0), (-1,-1), 4),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('PADDING', (0,0), (-1,-1), 6),
         ]))
-        story.append(tabela)
-        story.append(Spacer(1, 6))
+        story.append(tabela_cabecalho)
+        story.append(Spacer(1, 10))
 
-        # Avaliação Antropométrica OMS
+        # OMS
         story.append(Paragraph("Avaliação Antropométrica & Curvas da OMS", subtitulo_style))
         oms_dados = [
-            ["Indicador OMS", "Resultado Obtido", "Interpretação Clínica"],
+            ["Indicador OMS", "Resultado", "Interpretação Clínica"],
             ["IMC Calculado", f"{oms['imc']} kg/m²", "Relação Peso x Estatura"],
-            ["Escore Z (Z-Score)", oms['z_score'], "Desvio Padrão populacional"],
-            ["Percentil Estimado", oms['percentil_estimado'], "Posição na curva de referência"]
+            ["Escore Z", str(oms['z_score']), "Desvio Padrão populacional"],
+            ["Percentil", str(oms['percentil_estimado']), "Posição na curva de referência"]
         ]
-        tabela_oms = Table(oms_dados, colWidths=[130, 140, 270])
+        tabela_oms = Table(oms_dados, colWidths=[120, 120, 290])
         tabela_oms.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2563EB')),
             ('TEXTCOLOR', (0,0), (-1,0), colors.white),
             ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#93C5FD')),
-            ('PADDING', (0,0), (-1,-1), 4),
+            ('PADDING', (0,0), (-1,-1), 6),
         ]))
         story.append(tabela_oms)
-        story.append(Paragraph(f"<b>Parecer Clínico OMS:</b> {html.escape(oms['orientacao_clinica'])}", texto_style))
-        story.append(Spacer(1, 6))
+        story.append(Paragraph(f"<b>Parecer Clínico:</b> {limpar(oms['orientacao_clinica'])}", texto_style))
+        story.append(Spacer(1, 10))
 
-        # Macronutrientes
+        # Macros
         story.append(Paragraph("Distribuição Estimada de Macronutrientes", subtitulo_style))
         macro_dados = [
-            ["Proteínas (15%)", "Lipídios / Gorduras (30%)", "Carboidratos (55%)"],
+            ["Proteínas (15%)", "Lipídios (30%)", "Carboidratos (55%)"],
             [f"{macros['proteinas_g']} g/dia", f"{macros['lipidios_g']} g/dia", f"{macros['carboidratos_g']} g/dia"]
         ]
-        tabela_macro = Table(macro_dados, colWidths=[170, 180, 180])
+        tabela_macro = Table(macro_dados, colWidths=[175, 175, 180])
         tabela_macro.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#059669')),
             ('TEXTCOLOR', (0,0), (-1,0), colors.white),
             ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#A7F3D0')),
-            ('PADDING', (0,0), (-1,-1), 4),
+            ('PADDING', (0,0), (-1,-1), 6),
         ]))
         story.append(tabela_macro)
-        story.append(Spacer(1, 6))
+        story.append(Spacer(1, 10))
 
-        # Anamnese Resumida
+        # Anamnese
         if reg_anamnese and any(reg_anamnese):
-            doencas = html.escape(reg_anamnese[0] or 'Não informado')
-            comportamentos = html.escape(reg_anamnese[1] or 'Não informado')
-            preferencias = html.escape(reg_anamnese[2] or 'Não informado')
-            opiniao = html.escape(reg_anamnese[3] or 'Não informado')
-            
-            story.append(Paragraph("Resumo Clínico & Comportamental (Anamnese)", subtitulo_style))
+            story.append(Paragraph("Resumo Clínico & Comportamental", subtitulo_style))
             anamnese_texto = f"""
-            <b>Condições / Doenças:</b> {doencas}<br/>
-            <b>Comportamentos Alimentares:</b> {comportamentos}<br/>
-            <b>Preferências / Aversões:</b> {preferencias}<br/>
-            <b>Expectativa dos Pais:</b> {opiniao}
+            <b>Condições / Doenças:</b> {limpar(reg_anamnese[0])}<br/>
+            <b>Comportamentos Alimentares:</b> {limpar(reg_anamnese[1])}<br/>
+            <b>Preferências / Aversões:</b> {limpar(reg_anamnese[2])}<br/>
+            <b>Expectativa dos Pais:</b> {limpar(reg_anamnese[3])}
             """
             story.append(Paragraph(anamnese_texto, texto_style))
-            story.append(Spacer(1, 6))
+            story.append(Spacer(1, 10))
 
-        # Repertório Alimentar
+        # Repertório Sensorial com Texto Elástico
         if reg_repertorio:
             story.append(Paragraph("Repertório Sensorial Mapeado", subtitulo_style))
             rep_dados = [["Alimento", "Status", "Textura", "Sabor"]]
             for item in reg_repertorio:
-                rep_dados.append([html.escape(str(item[0])), html.escape(str(item[1])), html.escape(str(item[2])), html.escape(str(item[3]))])
+                # O segredo está aqui: transformar cada célula num Paragraph para forçar a quebra!
+                p_alimento = Paragraph(limpar(item[0]), tabela_texto_style)
+                p_status = Paragraph(limpar(item[1]), tabela_texto_style)
+                p_textura = Paragraph(limpar(item[2]), tabela_texto_style)
+                p_sabor = Paragraph(limpar(item[3]), tabela_texto_style)
+                rep_dados.append([p_alimento, p_status, p_textura, p_sabor])
             
-            tabela_rep = Table(rep_dados, colWidths=[140, 120, 130, 150])
+            tabela_rep = Table(rep_dados, colWidths=[140, 130, 130, 130])
             tabela_rep.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#D97706')),
                 ('TEXTCOLOR', (0,0), (-1,0), colors.white),
                 ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#FCD34D')),
-                ('PADDING', (0,0), (-1,-1), 3),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('PADDING', (0,0), (-1,-1), 6),
             ]))
             story.append(tabela_rep)
 
         doc.build(story)
         buffer.seek(0)
-        return StreamingResponse(buffer, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=Relatorio_{nome}.pdf"})
+        nome_arquivo = f"Relatorio_{nome.replace(' ', '_')}.pdf"
+        return StreamingResponse(buffer, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename={nome_arquivo}"})
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro interno na construção do PDF: {str(e)}")
+        # Se falhar novamente, isto vai imprimir o erro exato no terminal do Codespaces para nós!
+        print(f"====================\nERRO PDF: {e}\n====================")
+        raise HTTPException(status_code=500, detail=f"Erro interno no PDF: {str(e)}")
