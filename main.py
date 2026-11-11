@@ -15,7 +15,7 @@ from reportlab.lib import colors
 
 app = FastAPI(title="API Nutrição Pediátrica - Nuvem")
 
-DATABASE_URL = "postgresql://postgres:Matheus-32132@db.mmitgdneygmxmadrfunf.supabase.co:5432/postgres"
+DATABASE_URL = "postgresql://postgres.mmitgdneygmxmadrfunf:Matheus-32132@aws-0-us-east-1.pooler.supabase.com:6543/postgres"
 
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
